@@ -61,3 +61,23 @@ Stage Summary:
 - Real P&L data integrated (73.10% gross margin)
 - All data from verified POS daywise reports
 - Dark luxury theme with gold accents
+
+---
+## Task ID: 5 - fullstack-developer
+### Work Task
+Replace the existing GapsPage in the Parfumix ADCB dashboard with a comprehensive "Data Intelligence & Recommendations" page featuring 5 sections.
+
+### Work Summary
+- Replaced the GapsPage function (previously ~100 lines with simple priority alerts and roadmap) with a comprehensive ~470 line implementation
+- Added new imports: `RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis` from recharts and `CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt, Store, Calculator, ClipboardList, ArrowRight` from lucide-react
+- Created a standalone `DonutChart` SVG component (moved outside render to fix React lint rule)
+- Built 5 comprehensive sections:
+  1. **Data Completeness Score**: Large SVG donut (45% overall), 3 sub-score donuts (Revenue 85%, Financial 70%, Operational 20%), RadarChart visualization
+  2. **What We Have (Verified)**: 3 detailed cards for Revenue, P&L, CAPEX with confidence badges, detail lists, stats, and source attribution
+  3. **Missing Data Priority Matrix**: Table with 15 data gaps sorted by priority (CRITICAL/HIGH/MEDIUM/LOW) with icons, impact descriptions, and sources
+  4. **Dashboard Enhancement Recommendations**: 6 cards in 3x2 grid with impact ratings and descriptions
+  5. **Data Collection Action Plan**: Timeline-style roadmap with 5 phases (Week 1-2 through Ongoing) and target callout
+- Used existing theme constants (GOLD, ROSE, SAGE, AMBER, STEEL, CARD_BG, BORDER, T1, T2, T3) and components (KpiCard, ChartCard)
+- Priority badges use color coding: CRITICAL=ROSE, HIGH=AMBER, MEDIUM=GOLD, LOW=T3
+- ESLint passes with zero errors
+- Dev server compiles and returns 200 status

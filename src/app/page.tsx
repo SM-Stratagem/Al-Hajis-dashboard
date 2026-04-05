@@ -3,12 +3,15 @@
 import React, { useState } from 'react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
-  ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  ComposedChart, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import {
   LayoutDashboard, AlertTriangle, DollarSign, PieChartIcon, TrendingUp,
   CalendarDays, RotateCcw, CreditCard, BarChart3, Database, ChevronRight,
   Activity, Target, Zap, Eye, Clock, ShoppingCart, ArrowUpRight, ArrowDownRight,
+  CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt,
+  Store, Calculator, ClipboardList, ArrowRight,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════
@@ -1371,112 +1374,472 @@ function ForecastPage() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// PAGE 11: DATA GAPS
+// SVG DONUT CHART HELPER
+// ══════════════════════════════════════════════════════════════════
+function DonutChart({ percentage, size = 180, strokeWidth = 14, color }: { percentage: number; size?: number; strokeWidth?: number; color: string }) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percentage / 100) * circumference;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={strokeWidth} />
+      <circle
+        cx={size / 2} cy={size / 2} r={radius} fill="none"
+        stroke={color} strokeWidth={strokeWidth}
+        strokeDasharray={circumference} strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+      />
+    </svg>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE 11: DATA INTELLIGENCE & RECOMMENDATIONS
 // ══════════════════════════════════════════════════════════════════
 function GapsPage() {
-  const gaps = [
-    { priority: 'P1', title: 'Product-Level Sales Data', status: 'missing', desc: 'No SKU-level data — unable to identify top sellers, margins per product, or optimize inventory.' },
-    { priority: 'P2', title: 'Customer Demographics', status: 'missing', desc: 'Age, gender, nationality, new vs. returning — essential for marketing personalization.' },
-    { priority: 'P3', title: 'Footfall & Conversion Rate', status: 'missing', desc: 'No mall footfall data or store conversion tracking. Cannot measure sales efficiency.' },
-    { priority: 'P4', title: 'Expense Run-Rate (Jan–Mar 2026)', status: 'partial', desc: 'P&L covers Sep–Dec 2025 only. Jan–Mar expenses extrapolated from estimates.' },
-    { priority: 'P5', title: 'Staff Performance Metrics', status: 'missing', desc: 'Individual sales targets, conversion rates, average ticket size per staff member.' },
-    { priority: 'P6', title: 'Marketing Campaign Attribution', status: 'missing', desc: 'No tracking of which campaigns drive footfall or revenue. Marketing ROI is unmeasured.' },
-    { priority: 'P7', title: 'Competitor Benchmarking', status: 'missing', desc: 'No data on nearby perfume retail performance for comparison.' },
+  // — Data for Section 1 —
+  const overallScore = 45;
+  const subScores = [
+    { label: 'Revenue Data', score: 85, color: SAGE },
+    { label: 'Financial Data', score: 70, color: GOLD },
+    { label: 'Operational Data', score: 20, color: ROSE },
+  ];
+  const radarData = [
+    { axis: 'Revenue', value: 85, fullMark: 100 },
+    { axis: 'Financial', value: 70, fullMark: 100 },
+    { axis: 'Operational', value: 20, fullMark: 100 },
   ];
 
-  const roadmap = [
-    { phase: 'Phase 1', timeline: 'Immediate', actions: ['Capture SKU-level data in POS', 'Enable customer phone/email collection', 'Daily footfall count sheet'] },
-    { phase: 'Phase 2', timeline: 'Month 1–2', actions: ['Extend P&L tracking to current month', 'Staff shift performance log', 'Campaign tracking spreadsheet'] },
-    { phase: 'Phase 3', timeline: 'Month 3–6', actions: ['CRM integration with POS', 'Automated reporting dashboard', 'Mall footfall data access'] },
-    { phase: 'Phase 4', timeline: 'Month 6+', actions: ['Loyalty programme launch', 'Predictive analytics model', 'Competitive intelligence system'] },
+  // — Data for Section 2 —
+  const verifiedData = [
+    {
+      title: 'Revenue (6 months)',
+      confidence: 'HIGH',
+      confidenceColor: SAGE,
+      icon: Receipt,
+      details: [
+        'Monthly net / gross / returns / cash + card split',
+        'Daily revenue data per month with day-of-week alignment',
+        '6 months: Oct 2025 – Mar 2026',
+      ],
+      source: 'POS Daywise Reports',
+      stats: [
+        { label: 'Months covered', value: '6' },
+        { label: 'Total net', value: aed(totalNet) },
+        { label: 'Avg return rate', value: pct(avgReturnRate) },
+      ],
+    },
+    {
+      title: 'P&L (4 months)',
+      confidence: 'HIGH',
+      confidenceColor: SAGE,
+      icon: BarChart2,
+      details: [
+        `Covers ${PNL.period}`,
+        '27 expense line items',
+        `Gross margin verified: ${PNL.grossMargin}%`,
+        'Missing: Jan–Mar 2026',
+      ],
+      source: 'ADCB P&L Statement',
+      stats: [
+        { label: 'Months covered', value: '4' },
+        { label: 'Expense lines', value: '27' },
+        { label: 'Gross margin', value: `${PNL.grossMargin}%` },
+      ],
+    },
+    {
+      title: 'CAPEX (one-time)',
+      confidence: 'HIGH',
+      confidenceColor: SAGE,
+      icon: Package,
+      details: [
+        '17 items across 8 categories',
+        `Total investment: ${aed(TOTAL_INVESTMENT)}`,
+        `Setup: ${aed(TOTAL_CAPEX)} + Overheads: ${aed(TOTAL_OVERHEADS)}`,
+      ],
+      source: 'CAPEX Summary',
+      stats: [
+        { label: 'Items', value: '17' },
+        { label: 'Categories', value: '8' },
+        { label: 'Total', value: aed(TOTAL_INVESTMENT) },
+      ],
+    },
   ];
 
-  const prioColors: Record<string, string> = { P1: ROSE, P2: AMBER, P3: AMBER, P4: GOLD, P5: STEEL, P6: STEEL, P7: T3 };
-  const statusColors: Record<string, string> = { missing: ROSE, partial: GOLD, available: SAGE };
+  // — Data for Section 3 —
+  type MissingItem = {
+    icon: React.FC<{ size?: number; style?: React.CSSProperties }>;
+    name: string;
+    priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+    impact: string;
+    source: string;
+  };
+  const missingData: MissingItem[] = [
+    { icon: Receipt, name: 'Transaction-level data (receipt count, avg ticket/basket size)', priority: 'CRITICAL', impact: 'Real avg order value, conversion rate, items per transaction', source: 'POS system export' },
+    { icon: Package, name: 'Product/SKU-level sales', priority: 'CRITICAL', impact: 'Best/worst sellers, category margins, inventory velocity, reorder points', source: 'POS inventory module' },
+    { icon: BarChart2, name: 'P&L for Jan–Mar 2026', priority: 'CRITICAL', impact: 'Actual monthly net profit trend, validate if operation is profitable', source: 'Accountant / bookkeeper' },
+    { icon: Store, name: 'Monthly rent & lease terms', priority: 'CRITICAL', impact: 'True breakeven analysis, rent-to-revenue ratio', source: 'Lease agreement' },
+    { icon: Users, name: 'Staff costs breakdown (salaries, commissions, visa, accommodation)', priority: 'HIGH', impact: 'True labour cost ratio, staff productivity (revenue per staff hour)', source: 'HR / payroll' },
+    { icon: Package, name: 'Inventory on hand (current stock levels, cost value)', priority: 'HIGH', impact: 'Stock turn ratio, dead stock identification, reorder alerts', source: 'Warehouse / POS' },
+    { icon: Target, name: 'Marketing spend details (by channel / campaign)', priority: 'HIGH', impact: 'Marketing ROI, CAC per channel, which campaigns drive traffic', source: 'Marketing team / ad accounts' },
+    { icon: Store, name: 'Mall foot traffic data', priority: 'HIGH', impact: 'Capture rate (our sales / total footfall), conversion rate', source: 'Mall management' },
+    { icon: Users, name: 'Customer data (loyalty signups, repeat rate, demographics)', priority: 'MEDIUM', impact: 'CLV analysis, cohort tracking', source: 'Loyalty programme / CRM' },
+    { icon: RotateCcw, name: 'Return reasons (why products are returned)', priority: 'MEDIUM', impact: 'Root cause analysis, product quality issues', source: 'POS return notes' },
+    { icon: Store, name: 'Competitor pricing', priority: 'MEDIUM', impact: 'Price positioning, margin opportunity', source: 'Mystery shopping / market survey' },
+    { icon: Clock, name: 'Operating hours & shifts', priority: 'MEDIUM', impact: 'Revenue per hour, optimal staffing schedule', source: 'Staff schedule / timesheet' },
+    { icon: ClipboardList, name: 'Supplier terms (payment terms, credit period)', priority: 'LOW', impact: 'Working capital optimization', source: 'Purchase orders' },
+    { icon: CalendarDays, name: 'Seasonal calendar (Dubai events, mall promotions)', priority: 'LOW', impact: 'Correlate sales with external events', source: 'Marketing calendar' },
+    { icon: BarChart2, name: 'Online presence (social media engagement, reviews)', priority: 'LOW', impact: 'Brand sentiment, digital funnel tracking', source: 'Social analytics' },
+  ];
+
+  const priorityColors: Record<string, string> = { CRITICAL: ROSE, HIGH: AMBER, MEDIUM: GOLD, LOW: T3 };
+  const priorityOrder: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+
+  // — Data for Section 4 —
+  const recommendations = [
+    { title: 'Add Product Analytics Tab', impact: 'HIGH', impactColor: AMBER, icon: BarChart2, desc: 'Track top 10 SKUs, category performance, margin by product. Enables inventory optimization and assortment decisions.' },
+    { title: 'Add Daily Operations Tracker', impact: 'HIGH', impactColor: AMBER, icon: Activity, desc: 'Live/historical daily KPIs: sales target vs actual, returns, foot traffic comparison. Enables daily management decisions.' },
+    { title: 'Add Staff Performance View', impact: 'HIGH', impactColor: AMBER, icon: Users, desc: 'Revenue per staff, sales commission tracking, shift productivity. Enables fair compensation and scheduling.' },
+    { title: 'Add Breakeven Calculator', impact: 'HIGH', impactColor: AMBER, icon: Calculator, desc: 'Interactive slider for rent, salaries, target margin. Shows daily/weekly/monthly breakeven revenue. Enables goal setting.' },
+    { title: 'Add Cash Flow View', impact: 'MEDIUM', impactColor: GOLD, icon: DollarSign, desc: 'Monthly cash inflow/outflow, runway projection, seasonal cash needs. Enables working capital management.' },
+    { title: 'Add Customer Insights', impact: 'MEDIUM', impactColor: GOLD, icon: Users, desc: 'New vs repeat customer split, avg time between purchases, loyalty tier distribution. Enables retention strategies.' },
+  ];
+
+  // — Data for Section 5 —
+  const actionPlan = [
+    { phase: 'Week 1–2', color: ROSE, items: ['Get P&L for Jan–Mar 2026', 'Get monthly rent amount', 'Get staff cost details'] },
+    { phase: 'Week 3–4', color: AMBER, items: ['Export transaction-level POS data', 'Export product/SKU sales report'] },
+    { phase: 'Month 2', color: GOLD, items: ['Request mall foot traffic data', 'Set up marketing tracking by channel'] },
+    { phase: 'Month 3', color: SAGE, items: ['Launch loyalty programme', 'Start collecting customer data'] },
+    { phase: 'Ongoing', color: STEEL, items: ['Monthly data refresh: P&L', 'Monthly POS export', 'Monthly inventory count'] },
+  ];
 
   return (
     <div>
-      {/* P&L available highlight */}
-      <div style={{
-        background: 'rgba(88,152,122,0.06)', border: `1px solid rgba(88,152,122,0.2)`,
-        borderRadius: 10, padding: 16, marginBottom: 20,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <Activity size={14} style={{ color: SAGE }} />
-          <span style={{ fontSize: 11, color: SAGE, fontWeight: 600 }}>P&L Data Now Available</span>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* SECTION 1: Data Completeness Score                        */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 13, color: T1, marginBottom: 4 }}>Data Completeness Score</h2>
+        <p style={{ fontSize: 10, color: T3, marginBottom: 20 }}>How much of the full picture we currently have</p>
+
+        <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          {/* Left: Donut chart */}
+          <ChartCard>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+              <div style={{ position: 'relative' }}>
+                <DonutChart percentage={overallScore} color={overallScore < 50 ? AMBER : SAGE} size={200} strokeWidth={16} />
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: 42, fontFamily: 'Georgia, serif', color: T1, lineHeight: 1 }}>{overallScore}%</span>
+                  <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginTop: 4 }}>Overall</span>
+                </div>
+              </div>
+
+              {/* Sub-scores row */}
+              <div style={{ display: 'flex', gap: 24, marginTop: 4 }}>
+                {subScores.map((s) => (
+                  <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <DonutChart percentage={s.score} color={s.color} size={56} strokeWidth={5} />
+                    <div>
+                      <div style={{ fontSize: 14, fontFamily: 'Georgia, serif', color: T1 }}>{s.score}%</div>
+                      <div style={{ fontSize: 8, color: T3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </ChartCard>
+
+          {/* Right: Radar chart */}
+          <ChartCard title="Data Completeness Radar">
+            <ResponsiveContainer width="100%" height={280}>
+              <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+                <PolarGrid stroke="rgba(255,255,255,0.06)" />
+                <PolarAngleAxis dataKey="axis" tick={{ fill: T2, fontSize: 10 }} />
+                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: T3, fontSize: 8 }} />
+                <Radar
+                  name="Completeness"
+                  dataKey="value"
+                  stroke={GOLD}
+                  fill={GOLD}
+                  fillOpacity={0.15}
+                  strokeWidth={2}
+                />
+              </RadarChart>
+            </ResponsiveContainer>
+            <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 8 }}>
+              {subScores.map((s) => (
+                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.color, display: 'inline-block' }} />
+                  <span style={{ fontSize: 9, color: T3 }}>{s.label}: {s.score}%</span>
+                </div>
+              ))}
+            </div>
+          </ChartCard>
         </div>
-        <p style={{ fontSize: 11, color: T2, lineHeight: 1.6 }}>
-          Verified P&L for {PNL.period} has been integrated. Gross margin confirmed at{' '}
-          <span style={{ color: SAGE, fontWeight: 600 }}>{PNL.grossMargin}%</span>.
-          This resolves cost structure visibility and enables accurate unit economics modeling.
-        </p>
       </div>
 
-      {/* Priority alerts */}
-      <div style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 13, color: T1, marginBottom: 12 }}>Priority Data Gaps</h2>
-        <div className="flex flex-col gap-2">
-          {gaps.map((g, i) => (
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* SECTION 2: What We Have (Verified)                        */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 13, color: T1, marginBottom: 4 }}>What We Have — Verified</h2>
+        <p style={{ fontSize: 10, color: T3, marginBottom: 16 }}>Confirmed data sources already integrated into this dashboard</p>
+
+        <div className="grid grid-cols-3 gap-3">
+          {verifiedData.map((item, i) => (
             <div key={i} style={{
-              display: 'flex', gap: 12, padding: 14, background: CARD_BG,
-              border: `1px solid ${BORDER}`, borderRadius: 8, borderLeft: `3px solid ${prioColors[g.priority]}`,
+              background: CARD_BG, border: `1px solid ${BORDER}`,
+              borderRadius: 10, padding: 20,
             }}>
-              <span style={{
-                padding: '2px 8px', borderRadius: 4, fontSize: 9, fontWeight: 700,
-                background: `${prioColors[g.priority]}22`, color: prioColors[g.priority], flexShrink: 0, height: 'fit-content',
-              }}>
-                {g.priority}
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                  <span style={{ fontSize: 11, color: T1, fontWeight: 500 }}>{g.title}</span>
-                  <span style={{
-                    padding: '1px 6px', borderRadius: 3, fontSize: 8,
-                    background: `${statusColors[g.status]}22`, color: statusColors[g.status],
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: `${item.confidenceColor}15`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    {g.status.toUpperCase()}
-                  </span>
+                    <item.icon size={15} style={{ color: item.confidenceColor }} />
+                  </div>
+                  <span style={{ fontSize: 12, color: T1, fontWeight: 500 }}>{item.title}</span>
                 </div>
-                <p style={{ fontSize: 10, color: T3, lineHeight: 1.5 }}>{g.desc}</p>
+              </div>
+
+              {/* Confidence badge */}
+              <div style={{ marginBottom: 12 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 4, fontSize: 8, fontWeight: 700,
+                  background: `${item.confidenceColor}18`, color: item.confidenceColor,
+                }}>
+                  <CheckCircle2 size={10} />
+                  Confidence: {item.confidence}
+                </span>
+              </div>
+
+              {/* Details */}
+              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 14px 0' }}>
+                {item.details.map((d, j) => (
+                  <li key={j} style={{
+                    fontSize: 10, color: T2, padding: '3px 0', lineHeight: 1.5,
+                    display: 'flex', gap: 6, alignItems: 'flex-start',
+                  }}>
+                    <span style={{ color: SAGE, fontSize: 9, marginTop: 1 }}>✓</span>
+                    {d}
+                  </li>
+                ))}
+              </ul>
+
+              {/* Stats */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                {item.stats.map((st, j) => (
+                  <div key={j} style={{
+                    flex: 1, padding: '6px 8px', borderRadius: 6,
+                    background: 'rgba(255,255,255,0.02)', textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: 11, color: T1, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{st.value}</div>
+                    <div style={{ fontSize: 7, color: T3, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 2 }}>{st.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Source */}
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${BORDER}` }}>
+                <span style={{ fontSize: 8, color: T3 }}>
+                  Source: <span style={{ color: T2 }}>{item.source}</span>
+                </span>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Data collection roadmap */}
-      <ChartCard title="Data Collection Roadmap" wide>
-        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-              {['Phase', 'Timeline', 'Actions'].map(h => (
-                <th key={h} style={{
-                  textAlign: 'left', color: T3, padding: '8px 8px', fontWeight: 400,
-                  fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em',
-                }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {roadmap.map((r, i) => (
-              <tr key={i} style={{ borderBottom: `1px solid ${BORDER}` }}>
-                <td style={{ padding: '10px 8px', color: GOLD, fontWeight: 500, fontSize: 10 }}>{r.phase}</td>
-                <td style={{ padding: '10px 8px', color: T2, fontSize: 10 }}>{r.timeline}</td>
-                <td style={{ padding: '10px 8px' }}>
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                    {r.actions.map((a, j) => (
-                      <li key={j} style={{ fontSize: 10, color: T2, padding: '1px 0', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                        <span style={{ color: T3, fontSize: 8, marginTop: 2 }}>&#8250;</span>
-                        {a}
-                      </li>
-                    ))}
-                  </ul>
-                </td>
-              </tr>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* SECTION 3: Missing Data — Priority Matrix                 */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 13, color: T1, marginBottom: 4 }}>Missing Data — Priority Matrix</h2>
+        <p style={{ fontSize: 10, color: T3, marginBottom: 16 }}>15 data gaps ranked by business impact. Collecting these unlocks deeper analysis.</p>
+
+        <ChartCard>
+          <div style={{ maxHeight: 520, overflowY: 'auto', paddingRight: 4 }}>
+            <table style={{ width: '100%', fontSize: 10, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${BORDER}`, position: 'sticky', top: 0, background: CARD_BG, zIndex: 1 }}>
+                  <th style={{ textAlign: 'left', color: T3, padding: '10px 8px', fontWeight: 400, fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.08em', width: 36 }}></th>
+                  <th style={{ textAlign: 'left', color: T3, padding: '10px 8px', fontWeight: 400, fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Data Item</th>
+                  <th style={{ textAlign: 'left', color: T3, padding: '10px 8px', fontWeight: 400, fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.08em', width: 80 }}>Priority</th>
+                  <th style={{ textAlign: 'left', color: T3, padding: '10px 8px', fontWeight: 400, fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Unlocks</th>
+                  <th style={{ textAlign: 'left', color: T3, padding: '10px 8px', fontWeight: 400, fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.08em', width: 140 }}>Where to Get It</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...missingData].sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]).map((item, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                    <td style={{ padding: '10px 8px' }}>
+                      <item.icon size={14} style={{ color: priorityColors[item.priority], opacity: 0.7 }} />
+                    </td>
+                    <td style={{ padding: '10px 8px', color: T1, fontWeight: 400 }}>{item.name}</td>
+                    <td style={{ padding: '10px 8px' }}>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                        fontSize: 8, fontWeight: 700, letterSpacing: '0.06em',
+                        background: `${priorityColors[item.priority]}20`, color: priorityColors[item.priority],
+                      }}>
+                        {item.priority}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 8px', color: T2, lineHeight: 1.5 }}>{item.impact}</td>
+                    <td style={{ padding: '10px 8px', color: T3, fontStyle: 'italic' }}>{item.source}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Priority legend */}
+          <div style={{ display: 'flex', gap: 16, marginTop: 14, paddingTop: 12, borderTop: `1px solid ${BORDER}` }}>
+            {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map((p) => (
+              <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: priorityColors[p], display: 'inline-block' }} />
+                <span style={{ fontSize: 8, color: T3 }}>{p}: {missingData.filter(m => m.priority === p).length} items</span>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </ChartCard>
+          </div>
+        </ChartCard>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* SECTION 4: Dashboard Enhancement Recommendations          */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 13, color: T1, marginBottom: 4 }}>Dashboard Enhancement Recommendations</h2>
+        <p style={{ fontSize: 10, color: T3, marginBottom: 16 }}>6 new capabilities to add based on missing data priorities</p>
+
+        <div className="grid grid-cols-3 gap-3">
+          {recommendations.map((rec, i) => (
+            <div key={i} style={{
+              background: CARD_BG, border: `1px solid ${BORDER}`,
+              borderRadius: 10, padding: 20,
+              display: 'flex', flexDirection: 'column',
+            }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: `${rec.impactColor}12`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <rec.icon size={15} style={{ color: rec.impactColor }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: T1, fontWeight: 500, lineHeight: 1.3 }}>{rec.title}</div>
+                </div>
+              </div>
+
+              {/* Impact badge */}
+              <div style={{ marginBottom: 10 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 700,
+                  background: `${rec.impactColor}18`, color: rec.impactColor,
+                }}>
+                  <TrendingUp size={9} />
+                  Impact: {rec.impact}
+                </span>
+              </div>
+
+              {/* Description */}
+              <p style={{ fontSize: 10, color: T2, lineHeight: 1.6, flex: 1 }}>{rec.desc}</p>
+
+              {/* Action */}
+              <div style={{
+                marginTop: 14, paddingTop: 10, borderTop: `1px solid ${BORDER}`,
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}>
+                <ArrowRight size={10} style={{ color: GOLD, opacity: 0.6 }} />
+                <span style={{ fontSize: 9, color: GOLD, opacity: 0.7 }}>Requires missing data</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* SECTION 5: Data Collection Action Plan                    */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 13, color: T1, marginBottom: 4 }}>Data Collection Action Plan</h2>
+        <p style={{ fontSize: 10, color: T3, marginBottom: 20 }}>Phased roadmap to reach 80%+ data completeness</p>
+
+        <ChartCard>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, position: 'relative' }}>
+            {/* Vertical timeline line */}
+            <div style={{
+              position: 'absolute', left: 47, top: 12, bottom: 12,
+              width: 2, background: BORDER,
+            }} />
+
+            {actionPlan.map((phase, i) => (
+              <div key={i} style={{
+                display: 'flex', gap: 16, padding: '14px 0',
+                borderTop: i > 0 ? `1px solid ${BORDER}` : 'none',
+              }}>
+                {/* Timeline dot + label */}
+                <div style={{
+                  width: 96, flexShrink: 0, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', paddingTop: 2,
+                }}>
+                  <div style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: phase.color,
+                    border: `3px solid ${CARD_BG}`,
+                    boxShadow: `0 0 0 2px ${phase.color}40`,
+                    zIndex: 2,
+                  }} />
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, color: phase.color,
+                    marginTop: 8, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  }}>
+                    {phase.phase}
+                  </span>
+                </div>
+
+                {/* Action items */}
+                <div style={{ flex: 1, paddingLeft: 4 }}>
+                  {phase.items.map((item, j) => (
+                    <div key={j} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '4px 0',
+                    }}>
+                      <ArrowRight size={10} style={{ color: phase.color, opacity: 0.6, flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, color: T2 }}>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary callout */}
+          <div style={{
+            marginTop: 16, padding: '12px 16px', borderRadius: 8,
+            background: `${GOLD}08`, border: `1px solid ${GOLD}20`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <AlertCircle size={13} style={{ color: GOLD }} />
+              <span style={{ fontSize: 10, color: GOLD, fontWeight: 600 }}>Target: 80% Data Completeness</span>
+            </div>
+            <p style={{ fontSize: 10, color: T2, lineHeight: 1.6 }}>
+              Completing Phases 1–2 (first month) will bring overall completeness from 45% to approximately 70%. 
+              Adding Phase 3 items targets 80%+. The ongoing monthly refresh ensures data stays current.
+            </p>
+          </div>
+        </ChartCard>
+      </div>
     </div>
   );
 }
