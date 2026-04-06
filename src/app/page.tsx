@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   ComposedChart, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -125,6 +125,159 @@ const catColors: Record<string, string> = {
   People: '#bf5f8c',
   Other: T3,
 };
+
+// ══════════════════════════════════════════════════════════════════
+// STORE DATA TYPE & HOOK
+// ══════════════════════════════════════════════════════════════════
+interface StoreData {
+  months: string[];
+  monthsFull: string[];
+  gross: number[];
+  returns: number[];
+  net: number[];
+  cash: number[];
+  card: number[];
+  daily: { startDay: number; values: number[] }[];
+  capexItems: { name: string; amount: number; category: string }[];
+  overheads: { name: string; amount: number }[];
+  pnl: {
+    period: string; revenue: number; cogsGoods: number; cogsAccessories: number;
+    totalCogs: number; grossProfit: number; grossMargin: number;
+    totalExpenses: number; netProfitLoss: number;
+    expenses: { name: string; amount: number }[];
+  };
+  totalGross: number;
+  totalNet: number;
+  totalReturns: number;
+  totalCash: number;
+  totalCard: number;
+  avgMonthlyNet: number;
+  capitalRecovered: number;
+  avgReturnRate: number;
+  cardShare: number;
+  cumulativeNet: number[];
+  returnRates: number[];
+  momGrowth: (number | null)[];
+  cardPct: number[];
+  totalCapex: number;
+  totalOverheads: number;
+  totalInvestment: number;
+  monthlyData: {
+    month: string; fullMonth: string; gross: number; returns: number;
+    net: number; cash: number; card: number; cumNet: number;
+    returnRate: number; growth: number | null; cardPct: number;
+  }[];
+  capexByCategory: { name: string; value: number }[];
+}
+
+const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MNF = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function deriveMetrics(gross: number[], returns: number[], net: number[], cash: number[], card: number[]) {
+  const totalGross = gross.reduce((a, b) => a + b, 0);
+  const totalNet = net.reduce((a, b) => a + b, 0);
+  const totalReturns = returns.reduce((a, b) => a + b, 0);
+  const totalCash = cash.reduce((a, b) => a + b, 0);
+  const totalCard = card.reduce((a, b) => a + b, 0);
+  const n = net.length || 1;
+  const avgMonthlyNet = totalNet / n;
+  const cumulativeNet = net.reduce((acc: number[], v) => { acc.push((acc[acc.length - 1] || 0) + v); return acc; }, []);
+  const returnRates = gross.map((g, i) => +(returns[i] / g * 100).toFixed(2));
+  const momGrowth: (number | null)[] = net.map((v, i) => i === 0 ? null : +(((v - net[i - 1]) / net[i - 1]) * 100).toFixed(1));
+  const cardPct = card.map((c, i) => +(c / net[i] * 100).toFixed(1));
+  return { totalGross, totalNet, totalReturns, totalCash, totalCard, avgMonthlyNet, cumulativeNet, returnRates, momGrowth, cardPct };
+}
+
+function buildMonthlyData(months: string[], monthsFull: string[], gross: number[], returns: number[], net: number[], cash: number[], card: number[], cumNet: number[], returnRates: number[], momGrowth: (number | null)[], cardPct: number[]) {
+  return months.map((m, i) => ({ month: m, fullMonth: monthsFull[i], gross: gross[i], returns: returns[i], net: net[i], cash: cash[i], card: card[i], cumNet: cumNet[i], returnRate: returnRates[i], growth: momGrowth[i], cardPct: cardPct[i] }));
+}
+
+function buildCapexByCategory(items: { name: string; amount: number; category: string }[]) {
+  const cats: Record<string, number> = {};
+  items.forEach(item => { cats[item.category] = (cats[item.category] || 0) + item.amount; });
+  return Object.entries(cats).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+}
+
+function useStoreData(): { loading: boolean } & StoreData {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<StoreData>({
+    months: [...MONTHS], monthsFull: [...MONTHS_FULL],
+    gross: [...GROSS], returns: [...RETURNS], net: [...NET], cash: [...CASH], card: [...CARD],
+    daily: DAILY.map(d => ({ ...d })),
+    capexItems: CAPEX_ITEMS.map(i => ({ ...i })),
+    overheads: OVERHEADS.map(o => ({ ...o })),
+    pnl: { ...PNL, expenses: PNL.expenses.map(e => ({ ...e })) },
+    totalGross, totalNet, totalReturns, totalCash, totalCard,
+    avgMonthlyNet, capitalRecovered, avgReturnRate, cardShare,
+    cumulativeNet: [...cumulativeNet], returnRates: [...returnRates],
+    momGrowth: [...momGrowth], cardPct: [...cardPct],
+    totalCapex: TOTAL_CAPEX, totalOverheads: TOTAL_OVERHEADS, totalInvestment: TOTAL_INVESTMENT,
+    monthlyData: monthlyData.map(d => ({ ...d })),
+    capexByCategory: capexByCategory.map(c => ({ ...c })),
+  });
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [msRes, dailyRes, capexRes, ohRes, pnlRes] = await Promise.all([
+          fetch('/api/data/monthly-sales').then(r => r.json()),
+          fetch('/api/data/daily-sales').then(r => r.json()),
+          fetch('/api/data/capex').then(r => r.json()),
+          fetch('/api/data/overheads').then(r => r.json()),
+          fetch('/api/data/pnl').then(r => r.json()),
+        ]);
+        if (msRes.length > 0) {
+          const months = msRes.map((ms: any) => `${MN[ms.month - 1]} ${String(ms.year).slice(2)}`);
+          const monthsFull = msRes.map((ms: any) => `${MNF[ms.month - 1]} ${ms.year}`);
+          const gross = msRes.map((ms: any) => ms.gross);
+          const returns = msRes.map((ms: any) => ms.returns);
+          const net = msRes.map((ms: any) => ms.net);
+          const cash = msRes.map((ms: any) => ms.cash);
+          const card = msRes.map((ms: any) => ms.card);
+          const d = deriveMetrics(gross, returns, net, cash, card);
+
+          let daily = DAILY.map(dd => ({ ...dd }));
+          if (dailyRes.length > 0) {
+            const grouped = new Map<string, any[]>();
+            dailyRes.forEach((ds: any) => { const k = `${ds.month}-${ds.year}`; if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(ds); });
+            daily = msRes.map((ms: any) => {
+              const days = grouped.get(`${ms.month}-${ms.year}`) || [];
+              return days.length > 0 ? { startDay: days[0].dayOfWeek, values: days.map((dd: any) => dd.revenue) } : { startDay: 0, values: [] };
+            });
+          }
+
+          let pnl = { ...PNL, expenses: PNL.expenses.map(e => ({ ...e })) };
+          if (pnlRes.length > 0) {
+            const f = pnlRes[0];
+            pnl = { period: f.period, revenue: f.revenue, cogsGoods: f.cogsGoods, cogsAccessories: f.cogsAccessories, totalCogs: f.totalCogs, grossProfit: f.grossProfit, grossMargin: f.grossMargin, totalExpenses: f.totalExpenses, netProfitLoss: f.netProfitLoss, expenses: (f.expenses || []).map((e: any) => ({ name: e.name, amount: e.amount })) };
+          }
+
+          const capexItems = capexRes.length > 0 ? capexRes.map((c: any) => ({ name: c.name, amount: c.amount, category: c.category })) : CAPEX_ITEMS.map(i => ({ ...i }));
+          const overheads = ohRes.length > 0 ? ohRes.map((o: any) => ({ name: o.name, amount: o.amount })) : OVERHEADS.map(o => ({ ...o }));
+          const totalCapex = capexItems.reduce((s: number, i: any) => s + i.amount, 0);
+          const totalOverheads = overheads.reduce((s: number, o: any) => s + o.amount, 0);
+          const totalInvestment = totalCapex + totalOverheads;
+          const capitalRecovered = (d.totalNet / totalInvestment) * 100;
+          const avgReturnRate = (d.totalReturns / d.totalGross) * 100;
+          const cardShare = (d.totalCard / d.totalNet) * 100;
+
+          setData({
+            months, monthsFull, gross, returns, net, cash, card, daily,
+            capexItems, overheads, pnl,
+            ...d, capitalRecovered, avgReturnRate, cardShare,
+            totalCapex, totalOverheads, totalInvestment,
+            monthlyData: buildMonthlyData(months, monthsFull, gross, returns, net, cash, card, d.cumulativeNet, d.returnRates, d.momGrowth, d.cardPct),
+            capexByCategory: buildCapexByCategory(capexItems),
+          });
+        }
+      } catch (e) { console.error('Failed to fetch store data:', e); }
+      finally { setLoading(false); }
+    }
+    fetchData();
+  }, []);
+
+  return { loading, ...data };
+}
 
 // ══════════════════════════════════════════════════════════════════
 // KPI CARD
@@ -314,7 +467,8 @@ function Sidebar({ active, onChange }: { active: PageId; onChange: (p: PageId) =
 // ══════════════════════════════════════════════════════════════════
 // PAGE 1: DASHBOARD
 // ══════════════════════════════════════════════════════════════════
-function DashboardPage() {
+function DashboardPage({ data }: { data: StoreData }) {
+  const { months: MONTHS, monthsFull: MONTHS_FULL, net: NET, capexItems: CAPEX_ITEMS, totalInvestment: TOTAL_INVESTMENT, totalNet, avgMonthlyNet, capitalRecovered, totalReturns, avgReturnRate, cardShare, totalCard, totalCash, monthlyData } = data;
   const bestMonthIdx = NET.indexOf(Math.max(...NET));
   const keyMoneyBurden = ((CAPEX_ITEMS[0].amount / TOTAL_INVESTMENT) * 100).toFixed(1);
 
@@ -409,7 +563,8 @@ function DashboardPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 2: ALERTS
 // ══════════════════════════════════════════════════════════════════
-function AlertsPage() {
+function AlertsPage({ data }: { data: StoreData }) {
+  const { totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, pnl: PNL, capexItems: CAPEX_ITEMS, returns: RETURNS, returnRates, net: NET, momGrowth, cardShare } = data;
   const paybackMonths73 = Math.ceil(TOTAL_INVESTMENT / (avgMonthlyNet * (PNL.grossMargin / 100)));
   const paybackMonths62 = Math.ceil(TOTAL_INVESTMENT / (avgMonthlyNet * 0.62));
 
@@ -484,7 +639,8 @@ function AlertsPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 3: P&L MODEL
 // ══════════════════════════════════════════════════════════════════
-function PnlPage() {
+function PnlPage({ data }: { data: StoreData }) {
+  const { avgMonthlyNet, totalInvestment: TOTAL_INVESTMENT, pnl: PNL, monthlyData } = data;
   const [scenario, setScenario] = useState(73);
 
   const marginOptions = [
@@ -613,7 +769,8 @@ function PnlPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 4: CAPEX BREAKDOWN
 // ══════════════════════════════════════════════════════════════════
-function CapexPage() {
+function CapexPage({ data }: { data: StoreData }) {
+  const { capexItems: CAPEX_ITEMS, totalCapex: TOTAL_CAPEX, overheads: OVERHEADS, totalOverheads: TOTAL_OVERHEADS, totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, capexByCategory } = data;
   const sorted = [...CAPEX_ITEMS].sort((a, b) => b.amount - a.amount);
   const maxAmount = sorted[0].amount;
 
@@ -704,7 +861,8 @@ function CapexPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 5: PAYBACK ANALYSIS
 // ══════════════════════════════════════════════════════════════════
-function PaybackPage() {
+function PaybackPage({ data }: { data: StoreData }) {
+  const { totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, pnl: PNL, cumulativeNet, totalReturns, cardShare, totalCash } = data;
   const paybackGross = Math.ceil(TOTAL_INVESTMENT / avgMonthlyNet);
   const netAt73 = avgMonthlyNet * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total;
   const netAt62 = avgMonthlyNet * 0.62 - EST_MONTHLY_COSTS.total;
@@ -829,7 +987,8 @@ function PaybackPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 6: REVENUE TRENDS
 // ══════════════════════════════════════════════════════════════════
-function RevenuePage() {
+function RevenuePage({ data }: { data: StoreData }) {
+  const { months: MONTHS, monthsFull: MONTHS_FULL, net: NET, totalGross, totalNet, totalReturns, monthlyData, returns: RETURNS, cash: CASH, card: CARD, cardPct, momGrowth, cumulativeNet, returnRates, avgReturnRate } = data;
   const peakIdx = NET.indexOf(Math.max(...NET));
   const lowIdx = NET.indexOf(Math.min(...NET));
 
@@ -945,7 +1104,8 @@ function RevenuePage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 7: DAILY HEATMAP
 // ══════════════════════════════════════════════════════════════════
-function HeatmapPage() {
+function HeatmapPage({ data }: { data: StoreData }) {
+  const { months: MONTHS, monthsFull: MONTHS_FULL, daily: DAILY } = data;
   const [selectedMonth, setSelectedMonth] = useState(0);
   const monthData = DAILY[selectedMonth];
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1074,7 +1234,8 @@ function HeatmapPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 8: RETURNS ANALYSIS
 // ══════════════════════════════════════════════════════════════════
-function ReturnsPage() {
+function ReturnsPage({ data }: { data: StoreData }) {
+  const { months: MONTHS, monthsFull: MONTHS_FULL, totalReturns, avgReturnRate, returnRates, monthlyData, gross: GROSS, returns: RETURNS, net: NET } = data;
   const worstMonthIdx = returnRates.indexOf(Math.max(...returnRates));
   const targetRate = 1.5;
   const savingsAtTarget = GROSS.reduce((sum, g, i) => sum + (g * targetRate / 100 - RETURNS[i]), 0);
@@ -1157,7 +1318,8 @@ function ReturnsPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 9: PAYMENT MIX
 // ══════════════════════════════════════════════════════════════════
-function PaymentsPage() {
+function PaymentsPage({ data }: { data: StoreData }) {
+  const { totalCard, cardShare, totalCash, cash: CASH, months: MONTHS, monthsFull: MONTHS_FULL, monthlyData } = data;
   const highestCashIdx = CASH.indexOf(Math.max(...CASH));
   const loyaltyPotential = Math.round(totalCard * 0.03); // 3% repeat potential
 
@@ -1241,7 +1403,8 @@ function PaymentsPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 10: FORECAST
 // ══════════════════════════════════════════════════════════════════
-function ForecastPage() {
+function ForecastPage({ data }: { data: StoreData }) {
+  const { months: MONTHS, cumulativeNet, net: NET, totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet } = data;
   const forecastMonths = [
     { month: 'Apr 26', ...FORECAST.apr, type: 'forecast' as const },
     { month: 'May 26', ...FORECAST.may, type: 'forecast' as const },
@@ -1436,7 +1599,8 @@ function GaugeBar({ current, target, max, label, color }: { current: number; tar
 // ══════════════════════════════════════════════════════════════════
 // PAGE 12: BREAKEVEN CALCULATOR
 // ══════════════════════════════════════════════════════════════════
-function BreakevenPage() {
+function BreakevenPage({ data }: { data: StoreData }) {
+  const { avgMonthlyNet } = data;
   const [fixedCosts, setFixedCosts] = useState(EST_MONTHLY_COSTS.total);
   const [margin, setMargin] = useState(73);
   const [targetProfit, setTargetProfit] = useState(5000);
@@ -1587,7 +1751,8 @@ function BreakevenPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 13: WHAT-IF SIMULATOR
 // ══════════════════════════════════════════════════════════════════
-function SimulatorPage() {
+function SimulatorPage({ data }: { data: StoreData }) {
+  const { avgMonthlyNet, pnl: PNL, totalReturns, net: NET, months: MONTHS } = data;
   const [activeScenarios, setActiveScenarios] = useState<Set<number>>(new Set());
 
   const currentNetProfit = Math.round(avgMonthlyNet * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total);
@@ -1739,7 +1904,8 @@ function SimulatorPage() {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 14: WEEKLY PERFORMANCE
 // ══════════════════════════════════════════════════════════════════
-function WeeklyPage() {
+function WeeklyPage({ data }: { data: StoreData }) {
+  const { daily: DAILY, months: MONTHS, avgMonthlyNet } = data;
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const monthColors = [GOLD, SAGE, ROSE, STEEL, AMBER, GOLD_DIM];
 
@@ -1874,9 +2040,630 @@ function WeeklyPage() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// PAGE 15: DATA CENTER
+// ══════════════════════════════════════════════════════════════════
+function DataCenterPage() {
+  // ── State ──
+  const [status, setStatus] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [seedResult, setSeedResult] = useState<any>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+  const [uploadResults, setUploadResults] = useState<Record<string, any>>({});
+  const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  const [manualForm, setManualForm] = useState({
+    rent: '', salaries: '', utilities: '', software: '', marketingBudget: '',
+    period: '', revenue: '', cogs: '', grossProfit: '', grossMargin: '', totalExpenses: '', netProfitLoss: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState('');
+
+  // ── Fetch status ──
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch('/api/data/status');
+      const data = await res.json();
+      setStatus(data);
+    } catch (e) {
+      console.error('Failed to fetch status:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatus();
+  }, []);
+
+  // ── Handlers ──
+  const handleSeed = async () => {
+    setSeeding(true);
+    try {
+      const res = await fetch('/api/data/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await res.json();
+      setSeedResult(data);
+      if (data.success) setSeeded(true);
+      fetchStatus();
+    } catch (e) {
+      console.error('Seed failed:', e);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      await fetch('/api/data/reset', { method: 'DELETE' });
+      setSeedResult(null);
+      setSeeded(false);
+      setUploadResults({});
+      setResetDone(true);
+      setTimeout(() => setResetDone(false), 3000);
+      fetchStatus();
+    } catch (e) {
+      console.error('Reset failed:', e);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleUpload = async (category: string) => {
+    const fileInput = document.getElementById(`file-${category}`) as HTMLInputElement;
+    if (!fileInput?.files?.length) return;
+
+    setUploading(prev => ({ ...prev, [category]: true }));
+    try {
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      formData.append('category', category);
+      const res = await fetch('/api/data/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      setUploadResults(prev => ({ ...prev, [category]: data }));
+      fetchStatus();
+    } catch (e) {
+      console.error('Upload failed:', e);
+    } finally {
+      setUploading(prev => ({ ...prev, [category]: false }));
+    }
+  };
+
+  const handleManualSave = async () => {
+    setSaving(true);
+    setSaveResult('');
+    try {
+      const res = await fetch('/api/data/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true, manualData: manualForm }),
+      });
+      const data = await res.json();
+      setSaveResult(data.success ? 'Data saved successfully' : 'Failed to save data');
+      fetchStatus();
+    } catch {
+      setSaveResult('Error saving data');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Computed ──
+  const statusCategories = [
+    { key: 'monthlySales', label: 'Monthly Sales', color: GOLD },
+    { key: 'dailySales', label: 'Daily Sales', color: SAGE },
+    { key: 'capexItems', label: 'CAPEX Items', color: AMBER },
+    { key: 'overheads', label: 'Overheads', color: STEEL },
+    { key: 'pnlPeriods', label: 'P&L Periods', color: ROSE },
+    { key: 'products', label: 'Products', color: GOLD },
+    { key: 'staffCosts', label: 'Staff Costs', color: SAGE },
+    { key: 'marketingSpends', label: 'Marketing', color: AMBER },
+    { key: 'transactionSummaries', label: 'Transactions', color: STEEL },
+  ];
+
+  const hasDataKeys = [
+    'monthlySales', 'dailySales', 'capex', 'overheads',
+    'pnl', 'products', 'staffCosts', 'marketing', 'transactions',
+  ];
+
+  const overallCompleteness = status?.hasData
+    ? Math.round((Object.values(status.hasData).filter(Boolean).length / hasDataKeys.length) * 100)
+    : 0;
+
+  const uploadZones = [
+    { category: 'monthly-sales', title: 'Monthly Sales', icon: BarChart3, color: GOLD, description: 'CSV: month, year, gross, returns, net, cash, card', placeholder: 'month,year,gross,returns,net,cash,card\n10,2025,125000,3200,121800,28500,93300' },
+    { category: 'capex', title: 'CAPEX Items', icon: PieChartIcon, color: AMBER, description: 'CSV: name, amount, category', placeholder: 'name,amount,category\nKey Money,190000,Lease\nFit-out,120000,Fit-out' },
+    { category: 'overheads', title: 'Overheads', icon: DollarSign, color: STEEL, description: 'CSV: name, amount', placeholder: 'name,amount\nTrade License,15000\nInsurance,8000' },
+    { category: 'products', title: 'Products / SKU', icon: Package, color: SAGE, description: 'CSV: name, sku, category, unit_cost, selling_price, quantity, revenue', placeholder: 'name,sku,category,unit_cost,selling_price,quantity,revenue\nOud Perfume,PFM001,Perfume,85,350,45,15750' },
+    { category: 'monthly-sales', title: 'P&L Expenses', icon: Receipt, color: ROSE, description: 'CSV: name, amount (uploaded as expenses within a P&L period)', placeholder: 'name,amount\nStaff Salaries,25000\nRent,19000\nUtilities,3500' },
+    { category: 'transactions', title: 'Transactions', icon: CreditCard, color: GOLD, description: 'CSV: month, year, receipts, revenue', placeholder: 'month,year,receipts,revenue\n10,2025,380,125000\n11,2025,420,138000' },
+  ];
+
+  const recentUploads = status?.recentUploads || [];
+
+  // ── Shared styles ──
+  const inputStyle: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.03)', border: `1px solid ${BORDER}`,
+    borderRadius: 6, padding: '8px 12px', color: T1, fontSize: 11,
+    width: '100%', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+  };
+  const btnStyle = (bg: string, hoverBg: string, textColor = '#fff'): React.CSSProperties => ({
+    padding: '8px 16px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+    border: 'none', cursor: 'pointer', background: bg, color: textColor,
+    fontFamily: 'inherit', letterSpacing: '0.04em', textTransform: 'uppercase' as const,
+  });
+  const labelStyle: React.CSSProperties = { fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 };
+
+  // ── Render ──
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+        <div style={{ textAlign: 'center' }}>
+          <RefreshCw size={24} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} />
+          <div style={{ fontSize: 11, color: T3, marginTop: 12 }}>Loading database status…</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* ═══ Section Header ═══ */}
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 14, color: T1, marginBottom: 4 }}>Data Center</h2>
+        <p style={{ fontSize: 11, color: T3 }}>Manage database content — seed, upload, reset, and track data completeness</p>
+      </div>
+
+      {/* ═══ Section 1: Database Status Bar ═══ */}
+      <ChartCard title="Database Status" wide>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: overallCompleteness >= 80 ? `${SAGE}18` : overallCompleteness >= 40 ? `${AMBER}18` : `${ROSE}18`,
+              border: `2px solid ${overallCompleteness >= 80 ? SAGE : overallCompleteness >= 40 ? AMBER : ROSE}`,
+            }}>
+              <span style={{ fontSize: 18, fontFamily: 'Georgia, serif', fontWeight: 700, color: overallCompleteness >= 80 ? SAGE : overallCompleteness >= 40 ? AMBER : ROSE }}>
+                {overallCompleteness}%
+              </span>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: T1, fontWeight: 500 }}>Overall Completeness</div>
+              <div style={{ fontSize: 10, color: T3 }}>
+                {Object.values(status?.hasData || {}).filter(Boolean).length} of {hasDataKeys.length} categories have data
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleSeed}
+              disabled={seeding || seeded}
+              style={{
+                ...btnStyle(seeded ? `${SAGE}44` : GOLD, GOLD),
+                opacity: seeding || seeded ? 0.6 : 1,
+                cursor: seeding || seeded ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <Database size={13} />
+              {seeding ? 'Seeding…' : seeded ? 'Seeded ✓' : 'Seed Database'}
+            </button>
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              style={{
+                ...btnStyle(resetDone ? `${SAGE}44` : `${ROSE}22`, ROSE, ROSE),
+                opacity: resetting ? 0.6 : 1, border: `1px solid ${ROSE}44`,
+              }}
+            >
+              {resetting ? 'Resetting…' : resetDone ? 'Reset ✓' : 'Reset All Data'}
+            </button>
+          </div>
+        </div>
+
+        {/* Category status cards */}
+        <div className="grid grid-cols-3 gap-2" style={{ marginBottom: 4 }}>
+          {statusCategories.map(cat => {
+            const has = status?.hasData?.[cat.key] ?? false;
+            const count = status?.counts?.[cat.key] ?? 0;
+            return (
+              <div key={cat.key} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 14px', borderRadius: 8,
+                background: has ? `${cat.color}08` : 'rgba(255,255,255,0.015)',
+                border: `1px solid ${has ? `${cat.color}22` : BORDER}`,
+              }}>
+                {has ? (
+                  <CheckCircle2 size={16} style={{ color: SAGE, flexShrink: 0 }} />
+                ) : (
+                  <XCircle size={16} style={{ color: ROSE, flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: has ? T1 : T2, fontWeight: has ? 500 : 400 }}>{cat.label}</div>
+                  <div style={{ fontSize: 9, color: T3 }}>
+                    {has ? `${count} record${count !== 1 ? 's' : ''}` : 'No data'}
+                  </div>
+                </div>
+                <div style={{
+                  fontSize: 8, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                  background: has ? `${SAGE}18` : `${ROSE}18`, color: has ? SAGE : ROSE,
+                }}>
+                  {has ? 'OK' : 'EMPTY'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </ChartCard>
+
+      {/* ═══ Section 2: One-Click Seed ═══ */}
+      <ChartCard title="One-Click Data Seed" wide className="mt-3">
+        <div style={{
+          display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <p style={{ fontSize: 11, color: T2, lineHeight: 1.7, marginBottom: 14 }}>
+              Click <span style={{ color: GOLD, fontWeight: 600 }}>Load Existing Data</span> to populate the database with verified Parfumix ADCB kiosk data.
+              This includes all figures extracted from the original POS daywise reports, CAPEX summary, and P&L statement.
+            </p>
+            <div className="grid grid-cols-2 gap-2" style={{ marginBottom: 16 }}>
+              {[
+                { label: 'Monthly Sales', value: '6 months (Oct 2025 – Mar 2026)', color: GOLD },
+                { label: 'Daily Sales', value: '181 daily revenue records', color: SAGE },
+                { label: 'CAPEX Items', value: '17 items across 8 categories', color: AMBER },
+                { label: 'Overheads', value: '4 pre-launch overhead items', color: STEEL },
+                { label: 'P&L Period', value: '1 period with 27 expense lines', color: ROSE },
+                { label: 'Source', value: 'Verified POS & P&L documents', color: T2 },
+              ].map(item => (
+                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 4, height: 4, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: 9, color: T3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{item.label}</div>
+                    <div style={{ fontSize: 10, color: T2 }}>{item.value}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={handleSeed}
+              disabled={seeding || seeded}
+              style={{
+                ...btnStyle(seeded ? `${SAGE}44` : GOLD, GOLD),
+                padding: '10px 24px', fontSize: 11,
+                opacity: seeding || seeded ? 0.6 : 1,
+                cursor: seeding || seeded ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              <Upload size={14} />
+              {seeding ? 'Loading Data…' : seeded ? 'Data Loaded Successfully' : 'Load Existing Data'}
+            </button>
+          </div>
+
+          {/* Seed result panel */}
+          <div style={{
+            width: 280, flexShrink: 0, padding: 16, borderRadius: 8,
+            background: seedResult?.success ? `${SAGE}08` : seedResult ? `${ROSE}08` : 'rgba(255,255,255,0.015)',
+            border: `1px solid ${seedResult?.success ? `${SAGE}22` : seedResult ? `${ROSE}22` : BORDER}`,
+          }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 10 }}>
+              Seed Result
+            </div>
+            {seedResult?.success ? (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                  <CheckCircle2 size={14} style={{ color: SAGE }} />
+                  <span style={{ fontSize: 11, color: SAGE, fontWeight: 500 }}>Success</span>
+                </div>
+                {seedResult.results && Object.entries(seedResult.results).map(([key, val]) => (
+                  <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
+                    <span style={{ fontSize: 10, color: T2 }}>{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                    <span style={{ fontSize: 10, color: T1, fontVariantNumeric: 'tabular-nums' }}>{String(val)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : seedResult ? (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <XCircle size={14} style={{ color: ROSE }} />
+                  <span style={{ fontSize: 11, color: ROSE, fontWeight: 500 }}>Error</span>
+                </div>
+                <span style={{ fontSize: 10, color: T2 }}>{seedResult.error || 'Seed failed'}</span>
+              </div>
+            ) : (
+              <div style={{ fontSize: 10, color: T3, fontStyle: 'italic' }}>No seed operation yet</div>
+            )}
+          </div>
+        </div>
+      </ChartCard>
+
+      {/* ═══ Section 3: CSV Upload Zones ═══ */}
+      <div style={{ marginTop: 16, marginBottom: 12 }}>
+        <h3 style={{ fontSize: 12, color: T1, marginBottom: 4 }}>CSV Upload Zones</h3>
+        <p style={{ fontSize: 10, color: T3 }}>Upload CSV or TSV files for each data category. First row must be headers.</p>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {uploadZones.map(zone => {
+          const isUploading = uploading[zone.category] || false;
+          // use a stable key for result lookup based on zone title
+          const resultKey = zone.title === 'P&L Expenses' ? 'pnl-expenses' : zone.category;
+          const uploadResult = uploadResults[resultKey];
+          return (
+            <div key={zone.title} style={{
+              background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 10,
+              padding: 16, display: 'flex', flexDirection: 'column',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: `${zone.color}12`,
+                }}>
+                  <zone.icon size={16} style={{ color: zone.color }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: T1, fontWeight: 500 }}>{zone.title}</div>
+                  <div style={{ fontSize: 9, color: T3 }}>{zone.description}</div>
+                </div>
+              </div>
+
+              {/* Category badge */}
+              <div style={{
+                display: 'inline-block', marginBottom: 10, padding: '2px 8px', borderRadius: 4,
+                background: `${zone.color}12`, fontSize: 8, color: zone.color, fontWeight: 600,
+                letterSpacing: '0.06em', width: 'fit-content',
+              }}>
+                Category: {zone.category}
+              </div>
+
+              {/* File input area */}
+              <div style={{
+                border: `1px dashed ${BORDER}`, borderRadius: 6, padding: 12,
+                marginBottom: 10, textAlign: 'center', cursor: 'pointer',
+                transition: 'border-color 0.15s',
+              }}
+                onClick={() => document.getElementById(`file-${resultKey}`)?.click()}
+              >
+                <FileSpreadsheet size={18} style={{ color: T3, marginBottom: 4 }} />
+                <div style={{ fontSize: 9, color: T3 }}>
+                  Click to select .csv / .tsv
+                </div>
+                <input
+                  id={`file-${resultKey}`}
+                  type="file"
+                  accept=".csv,.tsv"
+                  style={{ display: 'none' }}
+                  onChange={() => {}} // file is read on upload
+                />
+              </div>
+
+              {/* Upload button */}
+              <button
+                onClick={() => handleUpload(zone.category === 'monthly-sales' && zone.title === 'P&L Expenses' ? 'overheads' : zone.category)}
+                disabled={isUploading}
+                style={{
+                  ...btnStyle(isUploading ? T3 : zone.color, zone.color),
+                  opacity: isUploading ? 0.6 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%',
+                }}
+              >
+                <Upload size={12} />
+                {isUploading ? 'Uploading…' : 'Upload'}
+              </button>
+
+              {/* Result display */}
+              {uploadResult && (
+                <div style={{
+                  marginTop: 10, padding: '8px 10px', borderRadius: 6, fontSize: 9,
+                  background: uploadResult.success ? `${SAGE}08` : `${ROSE}08`,
+                  border: `1px solid ${uploadResult.success ? `${SAGE}22` : `${ROSE}22`}`,
+                }}>
+                  {uploadResult.success ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <CheckCircle2 size={12} style={{ color: SAGE }} />
+                      <span style={{ color: SAGE }}>
+                        {uploadResult.rowCount} row{uploadResult.rowCount !== 1 ? 's' : ''} imported from {uploadResult.fileName}
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <XCircle size={12} style={{ color: ROSE }} />
+                      <span style={{ color: ROSE }}>{uploadResult.error || 'Upload failed'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ═══ Section 4: Manual Input Form ═══ */}
+      <ChartCard title="Manual Input — Key Metrics" wide className="mt-3">
+        <p style={{ fontSize: 10, color: T3, marginBottom: 16 }}>
+          Enter key financial metrics below. Values should be in AED. Use the &quot;Seed Database&quot; button above for the full verified dataset.
+        </p>
+
+        <div className="grid grid-cols-2 gap-6">
+          {/* Fixed Costs */}
+          <div>
+            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: GOLD, marginBottom: 12, fontWeight: 600 }}>
+              Fixed Costs (Monthly)
+            </div>
+            <div className="flex flex-col gap-3">
+              {[
+                { key: 'rent' as const, label: 'Rent', placeholder: 'e.g. 19000' },
+                { key: 'salaries' as const, label: 'Salaries', placeholder: 'e.g. 25000' },
+                { key: 'utilities' as const, label: 'Utilities', placeholder: 'e.g. 3500' },
+                { key: 'software' as const, label: 'Software / POS', placeholder: 'e.g. 1500' },
+                { key: 'marketingBudget' as const, label: 'Marketing Budget', placeholder: 'e.g. 5000' },
+              ].map(field => (
+                <div key={field.key}>
+                  <label style={labelStyle}>{field.label}</label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{
+                      position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                      fontSize: 10, color: T3,
+                    }}>AED</span>
+                    <input
+                      type="number"
+                      placeholder={field.placeholder}
+                      value={manualForm[field.key]}
+                      onChange={e => setManualForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      style={{ ...inputStyle, paddingLeft: 42 }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* P&L Summary */}
+          <div>
+            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: SAGE, marginBottom: 12, fontWeight: 600 }}>
+              P&L Summary
+            </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label style={labelStyle}>Period</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sep–Dec 2025"
+                  value={manualForm.period}
+                  onChange={e => setManualForm(prev => ({ ...prev, period: e.target.value }))}
+                  style={inputStyle}
+                />
+              </div>
+              {[
+                { key: 'revenue' as const, label: 'Revenue' },
+                { key: 'cogs' as const, label: 'COGS' },
+                { key: 'grossProfit' as const, label: 'Gross Profit' },
+                { key: 'grossMargin' as const, label: 'Gross Margin %' },
+                { key: 'totalExpenses' as const, label: 'Total Expenses' },
+                { key: 'netProfitLoss' as const, label: 'Net Profit / Loss' },
+              ].map(field => (
+                <div key={field.key}>
+                  <label style={labelStyle}>{field.label}</label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{
+                      position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                      fontSize: 10, color: T3,
+                    }}>
+                      {field.key === 'grossMargin' ? '%' : 'AED'}
+                    </span>
+                    <input
+                      type="number"
+                      placeholder={field.key === 'grossMargin' ? 'e.g. 73.1' : 'e.g. 250000'}
+                      value={manualForm[field.key]}
+                      onChange={e => setManualForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      style={{ ...inputStyle, paddingLeft: field.key === 'grossMargin' ? 30 : 42 }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={handleManualSave}
+            disabled={saving}
+            style={{
+              ...btnStyle(GOLD, GOLD),
+              opacity: saving ? 0.6 : 1, cursor: saving ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {saving ? 'Saving…' : 'Save Metrics'}
+          </button>
+          {saveResult && (
+            <span style={{
+              fontSize: 10, fontWeight: 500,
+              color: saveResult.includes('success') ? SAGE : ROSE,
+            }}>
+              {saveResult.includes('success') ? '✓ ' : '✗ '}{saveResult}
+            </span>
+          )}
+        </div>
+      </ChartCard>
+
+      {/* ═══ Section 5: Upload History ═══ */}
+      <ChartCard title="Upload History" wide className="mt-3">
+        {recentUploads.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <FileSpreadsheet size={24} style={{ color: T3, marginBottom: 8 }} />
+            <div style={{ fontSize: 11, color: T3 }}>No uploads yet. Seed the database or upload CSV files to get started.</div>
+          </div>
+        ) : (
+          <div style={{ maxHeight: 384, overflowY: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${BORDER}`, position: 'sticky', top: 0, background: CARD_BG }}>
+                  {['Date', 'Category', 'File Name', 'Rows', 'Status'].map(h => (
+                    <th key={h} style={{
+                      textAlign: h === 'Rows' || h === 'Date' ? 'right' : 'left',
+                      color: T3, padding: '8px 0', fontWeight: 400, fontSize: 9,
+                      textTransform: 'uppercase', letterSpacing: '0.08em',
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {recentUploads.map((u: any, i: number) => {
+                  const statusColor = u.status === 'success' ? SAGE : u.status === 'error' ? ROSE : AMBER;
+                  const statusLabel = u.status === 'success' ? 'OK' : u.status === 'error' ? 'FAIL' : 'PARTIAL';
+                  return (
+                    <tr key={u.id || i} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                      <td style={{ padding: '7px 0', color: T2, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 10 }}>
+                        {u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </td>
+                      <td style={{ padding: '7px 0' }}>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                          background: `${statusColor}12`, color: statusColor,
+                          textTransform: 'uppercase', letterSpacing: '0.06em',
+                        }}>
+                          {u.category}
+                        </span>
+                      </td>
+                      <td style={{ padding: '7px 0', color: T1, fontSize: 10 }}>{u.fileName}</td>
+                      <td style={{ padding: '7px 0', color: T1, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 10 }}>
+                        {u.rowCount}
+                      </td>
+                      <td style={{ padding: '7px 0', textAlign: 'right' }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          padding: '2px 8px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                          background: `${statusColor}12`, color: statusColor,
+                        }}>
+                          {u.status === 'success' ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
+                          {statusLabel}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ChartCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // PAGE 11: DATA INTELLIGENCE & RECOMMENDATIONS
 // ══════════════════════════════════════════════════════════════════
-function GapsPage() {
+function GapsPage({ data }: { data: StoreData }) {
+  const { totalNet, avgReturnRate, pnl: PNL, totalInvestment: TOTAL_INVESTMENT, totalCapex: TOTAL_CAPEX, totalOverheads: TOTAL_OVERHEADS } = data;
   // — Data for Section 1 —
   const overallScore = 45;
   const subScores = [
@@ -2325,26 +3112,42 @@ function GapsPage() {
 // ══════════════════════════════════════════════════════════════════
 // MAIN PAGE COMPONENT
 // ══════════════════════════════════════════════════════════════════
-const pageComponents: Record<PageId, React.FC> = {
-  dashboard: DashboardPage,
-  alerts: AlertsPage,
-  pnl: PnlPage,
-  capex: CapexPage,
-  payback: PaybackPage,
-  breakeven: BreakevenPage,
-  revenue: RevenuePage,
-  heatmap: HeatmapPage,
-  weekly: WeeklyPage,
-  returns: ReturnsPage,
-  payments: PaymentsPage,
-  forecast: ForecastPage,
-  simulator: SimulatorPage,
-  gaps: GapsPage,
+const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
+  dashboard: (props) => <DashboardPage {...props} />,
+  alerts: (props) => <AlertsPage {...props} />,
+  pnl: (props) => <PnlPage {...props} />,
+  capex: (props) => <CapexPage {...props} />,
+  payback: (props) => <PaybackPage {...props} />,
+  breakeven: (props) => <BreakevenPage {...props} />,
+  revenue: (props) => <RevenuePage {...props} />,
+  heatmap: (props) => <HeatmapPage {...props} />,
+  weekly: (props) => <WeeklyPage {...props} />,
+  returns: (props) => <ReturnsPage {...props} />,
+  payments: (props) => <PaymentsPage {...props} />,
+  forecast: (props) => <ForecastPage {...props} />,
+  simulator: (props) => <SimulatorPage {...props} />,
+  gaps: (props) => <GapsPage {...props} />,
+  'data-center': (_props) => <DataCenterPage />,
 };
 
 export default function Home() {
   const [activePage, setActivePage] = useState<PageId>('dashboard');
+  const storeData = useStoreData();
   const PageComponent = pageComponents[activePage];
+
+  if (storeData.loading) {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
+        <Sidebar active={activePage} onChange={setActivePage} />
+        <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}>
+            <RefreshCw size={28} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} />
+            <div style={{ fontSize: 12, color: T3, marginTop: 16 }}>Loading dashboard data…</div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -2367,7 +3170,7 @@ export default function Home() {
           <div style={{ width: 40, height: 2, background: GOLD, borderRadius: 1, opacity: 0.4 }} />
         </div>
 
-        <PageComponent />
+        <PageComponent data={storeData} />
       </main>
     </div>
   );

@@ -102,3 +102,50 @@ Add 3 new high-impact dashboard pages: Breakeven Calculator, What-If Simulator, 
 - No existing page functions were modified
 - No new imports needed (all icons and recharts components already imported)
 - ESLint passes with zero errors
+
+---
+## Task ID: 7 - fullstack-developer
+### Work Task
+Build the DataCenterPage component for the Parfumix ADCB Dashboard with 5 comprehensive sections: Database Status, One-Click Seed, CSV Upload Zones, Manual Input Form, and Upload History.
+
+### Work Summary
+- Added `useEffect` to the React import on line 3 (changed `useState` to `useState, useEffect`)
+- Created the `DataCenterPage` function (~620 lines) before GapsPage with 5 sections:
+  1. **Database Status Bar**: Fetches from `GET /api/data/status` on mount, shows 9 category cards (monthly sales, daily sales, CAPEX, overheads, P&L, products, staff costs, marketing, transactions) with green checkmark / red X status indicators, overall completeness percentage circle, "Seed Database" and "Reset All Data" action buttons
+  2. **One-Click Seed**: Prominent card with "Load Existing Data" button that calls `POST /api/data/seed` with `{ confirm: true }`, detailed description of what data gets loaded (6 months sales, 181 daily records, 17 CAPEX items, 4 overheads, 1 P&L period with 27 expense lines), success/error result panel with row counts per category, button disabled after successful seed
+  3. **CSV Upload Zones (3x2 grid)**: 6 upload cards for Monthly Sales, CAPEX Items, Overheads, Products/SKU, P&L Expenses, Transactions — each with icon, title, CSV format description, dashed file-drop area, upload button, and success/error result display
+  4. **Manual Input Form**: Two-column form with Fixed Costs (rent, salaries, utilities, software, marketing budget) and P&L Summary (period, revenue, COGS, gross profit, gross margin %, total expenses, net profit/loss) — AED-prefixed inputs with save button
+  5. **Upload History**: Table from `recentUploads` in status response showing Date, Category, File Name, Rows, Status columns with color-coded badges
+- Added `'data-center': DataCenterPage` to the `pageComponents` record map
+- Used existing theme constants (GOLD, ROSE, SAGE, AMBER, STEEL, CARD_BG, BORDER, T1, T2, T3) and components (KpiCard, ChartCard)
+- Loading state with spinning RefreshCw icon while fetching status
+- No existing page functions were modified
+- No new imports needed (all icons already imported: Upload, FileSpreadsheet, RefreshCw, Database, CheckCircle2, XCircle, BarChart3, PieChartIcon, DollarSign, Package, Receipt, CreditCard)
+- ESLint passes with zero errors
+- Dev server compiles and returns 200 status
+
+---
+## Task ID: 8 - fullstack-developer
+### Work Task
+Refactor the Parfumix Dashboard to read from API instead of hardcoded constants in data.ts, so that when users upload new data through the Data Center page, all dashboard pages update dynamically.
+
+### Work Summary
+- Created a `StoreData` interface defining the complete data shape needed by all 14 page components (months, gross, returns, net, cash, card, daily, capex, overheads, pnl, derived metrics)
+- Created helper functions: `deriveMetrics()` (computes totals, cumulative, return rates, MoM growth, card%), `buildMonthlyData()`, `buildCapexByCategory()`
+- Implemented `useStoreData()` custom hook (~80 lines) that:
+  - Initializes state from hardcoded data.ts constants (as fallback)
+  - Fetches from 5 API endpoints in parallel (`/api/data/monthly-sales`, `/api/data/daily-sales`, `/api/data/capex`, `/api/data/overheads`, `/api/data/pnl`)
+  - Transforms API responses into the same shape as the original constants (e.g., daily sales grouped by month with startDay + values array)
+  - Computes all derived metrics (totals, averages, cumulative net, return rates, MoM growth, card share, capital recovered, CAPEX/overhead totals, investment)
+  - Falls back to hardcoded constants if API fetch fails
+- Updated all 14 page components (except DataCenterPage) to accept `{ data: StoreData }` props:
+  - Each component destructures the StoreData fields using aliased names that match the original constant names (e.g., `data.net` → `NET`), so the rest of the component code is unchanged
+  - Pages updated: Dashboard, Alerts, P&L Model, CAPEX, Payback, Revenue, Heatmap, Weekly, Returns, Payments, Forecast, Breakeven, Simulator, Gaps
+- Updated `pageComponents` map to wrap each component in a lambda that passes data props; DataCenterPage remains unwrapped (manages its own data)
+- Updated `Home` component to:
+  - Call `useStoreData()` hook on mount
+  - Show dark-themed loading spinner (RefreshCw icon with spin animation) while data loads, with sidebar still visible
+  - Pass `storeData` to active page component via `data` prop
+- EST_MONTHLY_COSTS and FORECAST remain as hardcoded imports (not stored in DB)
+- ESLint passes with zero errors
+- Dev server compiles successfully; all API endpoints return 200; dashboard renders correctly with API-sourced data
