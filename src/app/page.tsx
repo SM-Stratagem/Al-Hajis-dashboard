@@ -176,7 +176,7 @@ function ChartCard({ title, children, wide }: { title?: string; children: React.
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
 // ══════════════════════════════════════════════════════════════════
-type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'revenue' | 'heatmap' | 'returns' | 'payments' | 'forecast' | 'gaps';
+type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps';
 
 const navSections = [
   {
@@ -192,6 +192,7 @@ const navSections = [
       { id: 'pnl' as PageId, label: 'P&L Model', icon: DollarSign },
       { id: 'capex' as PageId, label: 'CAPEX Breakdown', icon: PieChartIcon },
       { id: 'payback' as PageId, label: 'Payback Analysis', icon: Target },
+      { id: 'breakeven' as PageId, label: 'Breakeven', icon: Calculator },
     ],
   },
   {
@@ -199,6 +200,7 @@ const navSections = [
     items: [
       { id: 'revenue' as PageId, label: 'Revenue Trends', icon: TrendingUp },
       { id: 'heatmap' as PageId, label: 'Daily Heatmap', icon: CalendarDays },
+      { id: 'weekly' as PageId, label: 'Weekly', icon: BarChart2 },
     ],
   },
   {
@@ -212,6 +214,7 @@ const navSections = [
     title: 'Strategy',
     items: [
       { id: 'forecast' as PageId, label: 'Forecast', icon: BarChart3 },
+      { id: 'simulator' as PageId, label: 'What-If', icon: Zap },
       { id: 'gaps' as PageId, label: 'Data Gaps', icon: Database },
     ],
   },
@@ -1396,6 +1399,475 @@ function DonutChart({ percentage, size = 180, strokeWidth = 14, color }: { perce
 }
 
 // ══════════════════════════════════════════════════════════════════
+// GAUGE BAR HELPER
+// ══════════════════════════════════════════════════════════════════
+function GaugeBar({ current, target, max, label, color }: { current: number; target: number; max: number; label: string; color: string }) {
+  const clampedCurrent = Math.min(current, max);
+  const clampedTarget = Math.min(target, max);
+  const currentPct = (clampedCurrent / max) * 100;
+  const targetPct = (clampedTarget / max) * 100;
+  const above = current >= target;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontSize: 10, color: T2 }}>{label}</span>
+        <span style={{ fontSize: 10, color: above ? SAGE : ROSE, fontWeight: 500 }}>
+          {above ? '+' : ''}{pct(((current - target) / target) * 100)} vs breakeven
+        </span>
+      </div>
+      <div style={{ height: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 6, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${currentPct}%`, background: `${color}88`, borderRadius: 6, transition: 'width 0.3s' }} />
+        <div style={{ position: 'absolute', top: -2, left: `${targetPct}%`, width: 2, height: 16, background: ROSE, borderRadius: 1, transition: 'left 0.3s' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+        <span style={{ fontSize: 8, color: T3 }}>{aed(Math.round(current))} current</span>
+        <span style={{ fontSize: 8, color: ROSE }}>{aed(Math.round(target))} breakeven</span>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE 12: BREAKEVEN CALCULATOR
+// ══════════════════════════════════════════════════════════════════
+function BreakevenPage() {
+  const [fixedCosts, setFixedCosts] = useState(EST_MONTHLY_COSTS.total);
+  const [margin, setMargin] = useState(73);
+  const [targetProfit, setTargetProfit] = useState(5000);
+
+  const monthlyBreakeven = fixedCosts / (margin / 100);
+  const dailyBreakeven = monthlyBreakeven / 30;
+  const revenueForTarget = (fixedCosts + targetProfit) / (margin / 100);
+  const currentVsBreakeven = avgMonthlyNet - monthlyBreakeven;
+  const currentVsPct = (currentVsBreakeven / monthlyBreakeven) * 100;
+
+  const sensitivityMargins = [55, 62, 70, 73, 80];
+  const sensitivityData = sensitivityMargins.map(m => ({
+    margin: `${m}%`,
+    breakeven: Math.round(fixedCosts / (m / 100)),
+    daily: Math.round((fixedCosts / (m / 100)) / 30),
+  }));
+
+  const costDonutData = [
+    { name: 'Rent', value: EST_MONTHLY_COSTS.rent },
+    { name: 'Salaries', value: EST_MONTHLY_COSTS.salaries },
+    { name: 'Marketing', value: EST_MONTHLY_COSTS.marketing },
+    { name: 'Utilities', value: EST_MONTHLY_COSTS.utilities },
+    { name: 'Misc', value: EST_MONTHLY_COSTS.misc },
+    { name: 'Software', value: EST_MONTHLY_COSTS.software },
+  ];
+  const costColors = [GOLD, SAGE, AMBER, STEEL, T3, ROSE];
+
+  const sliderStyle = {
+    display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 20,
+  };
+  const labelRow = {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+  };
+
+  return (
+    <div>
+      <style>{`
+        input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #c9a55a; cursor: pointer; }
+        input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #c9a55a; cursor: pointer; border: none; }
+      `}</style>
+
+      {/* Sliders */}
+      <ChartCard title="Adjust Assumptions" className="mb-3">
+        <div style={sliderStyle}>
+          <div style={labelRow}>
+            <span style={{ fontSize: 10, color: T2 }}>Monthly Fixed Costs</span>
+            <span style={{ fontSize: 11, color: T1, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{aed(fixedCosts)}</span>
+          </div>
+          <input type="range" min={15000} max={60000} step={500} value={fixedCosts} onChange={e => setFixedCosts(Number(e.target.value))} />
+        </div>
+        <div style={sliderStyle}>
+          <div style={labelRow}>
+            <span style={{ fontSize: 10, color: T2 }}>Gross Margin %</span>
+            <span style={{ fontSize: 11, color: T1, fontWeight: 600 }}>{margin}%</span>
+          </div>
+          <input type="range" min={40} max={85} step={1} value={margin} onChange={e => setMargin(Number(e.target.value))} />
+        </div>
+        <div style={{ ...sliderStyle, marginBottom: 0 }}>
+          <div style={labelRow}>
+            <span style={{ fontSize: 10, color: T2 }}>Target Monthly Profit</span>
+            <span style={{ fontSize: 11, color: T1, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{aed(targetProfit)}</span>
+          </div>
+          <input type="range" min={0} max={30000} step={500} value={targetProfit} onChange={e => setTargetProfit(Number(e.target.value))} />
+        </div>
+      </ChartCard>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Monthly Breakeven" value={aed(Math.round(monthlyBreakeven))} sub={`Costs / ${margin}% margin`} badge="Revenue needed" badgeColor={GOLD} />
+        <KpiCard label="Daily Breakeven" value={aed(Math.round(dailyBreakeven))} sub={`${aed(Math.round(monthlyBreakeven))} / 30 days`} />
+        <KpiCard label="Revenue for Target" value={aed(Math.round(revenueForTarget))} sub={`Breakeven + ${aed(targetProfit)} profit`} badge={pct(((revenueForTarget - monthlyBreakeven) / monthlyBreakeven) * 100)} badgeColor={SAGE} />
+        <KpiCard
+          label="Current vs Breakeven"
+          value={aed(Math.round(Math.abs(currentVsBreakeven)))}
+          sub={currentVsBreakeven >= 0 ? 'above breakeven' : 'below breakeven'}
+          badge={currentVsBreakeven >= 0 ? `${pct(currentVsPct)} above` : `${pct(Math.abs(currentVsPct))} below`}
+          badgeColor={currentVsBreakeven >= 0 ? SAGE : ROSE}
+        />
+      </div>
+
+      {/* Gauge bar */}
+      <ChartCard title="Revenue vs Breakeven Gauge" className="mb-3">
+        <GaugeBar
+          current={avgMonthlyNet}
+          target={monthlyBreakeven}
+          max={Math.max(avgMonthlyNet, monthlyBreakeven, revenueForTarget) * 1.2}
+          label="Avg Monthly Revenue"
+          color={GOLD}
+        />
+        <GaugeBar
+          current={revenueForTarget}
+          target={monthlyBreakeven}
+          max={Math.max(avgMonthlyNet, monthlyBreakeven, revenueForTarget) * 1.2}
+          label="Revenue for Target Profit"
+          color={SAGE}
+        />
+      </ChartCard>
+
+      {/* Sensitivity table + Cost donut */}
+      <div className="grid grid-cols-5 gap-3 mb-3">
+        <div className="col-span-3">
+          <ChartCard title="Breakeven Sensitivity by Margin">
+            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                  <th style={{ textAlign: 'left', color: T3, padding: '8px 6px', fontWeight: 400, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Margin</th>
+                  <th style={{ textAlign: 'right', color: T3, padding: '8px 6px', fontWeight: 400, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Monthly Breakeven</th>
+                  <th style={{ textAlign: 'right', color: T3, padding: '8px 6px', fontWeight: 400, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Daily Target</th>
+                  <th style={{ textAlign: 'right', color: T3, padding: '8px 6px', fontWeight: 400, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em' }}>vs Current</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sensitivityData.map((d, i) => {
+                  const diff = avgMonthlyNet - d.breakeven;
+                  const diffPct = (diff / d.breakeven) * 100;
+                  return (
+                    <tr key={i} style={{ borderBottom: `1px solid ${BORDER}`, background: sensitivityMargins[i] === margin ? 'rgba(201,165,90,0.04)' : 'transparent' }}>
+                      <td style={{ padding: '7px 6px', color: sensitivityMargins[i] === 73 ? GOLD : T2, fontWeight: sensitivityMargins[i] === 73 ? 600 : 400 }}>{d.margin}</td>
+                      <td style={{ padding: '7px 6px', color: T1, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{aed(d.breakeven)}</td>
+                      <td style={{ padding: '7px 6px', color: T2, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{aed(d.daily)}</td>
+                      <td style={{ padding: '7px 6px', color: diff >= 0 ? SAGE : ROSE, textAlign: 'right', fontWeight: 500 }}>{diff >= 0 ? '+' : ''}{pct(diffPct)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </ChartCard>
+        </div>
+        <div className="col-span-2">
+          <ChartCard title="Fixed Cost Breakdown">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={costDonutData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" stroke="none">
+                  {costDonutData.map((_c, i) => <Cell key={i} fill={costColors[i]} />)}
+                </Pie>
+                <Tooltip formatter={(v: number) => aed(v)} contentStyle={ttStyle} />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: T2 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE 13: WHAT-IF SIMULATOR
+// ══════════════════════════════════════════════════════════════════
+function SimulatorPage() {
+  const [activeScenarios, setActiveScenarios] = useState<Set<number>>(new Set());
+
+  const currentNetProfit = Math.round(avgMonthlyNet * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total);
+  const currentCosts = EST_MONTHLY_COSTS.total;
+
+  const scenarios = [
+    {
+      title: 'Rent Increase to AED 15,000/mo',
+      tag: 'RISK', tagColor: ROSE,
+      icon: Store,
+      before: { costs: currentCosts, netProfit: currentNetProfit },
+      after: {
+        costs: currentCosts + 4000,
+        netProfit: currentNetProfit - 4000,
+      },
+      impact: `Costs rise ${aed(4000)}/mo. New monthly net: ${aed(currentNetProfit - 4000)}`,
+    },
+    {
+      title: 'Reduce Returns by 50%',
+      tag: 'OPPORTUNITY', tagColor: SAGE,
+      icon: RotateCcw,
+      before: { annualReturns: totalReturns },
+      after: { annualReturns: Math.round(totalReturns * 0.5) },
+      impact: `Recover ~${aed(Math.round(totalReturns * 0.5))}/yr in saved returns`,
+    },
+    {
+      title: 'Add 3rd Staff Member',
+      tag: 'COST', tagColor: AMBER,
+      icon: Users,
+      before: { costs: currentCosts, netProfit: currentNetProfit },
+      after: { costs: currentCosts + 3000, netProfit: currentNetProfit - 3000 },
+      impact: `+${aed(3000)}/mo salary. Revenue needed: ${aed(currentCosts + 3000 + currentNetProfit)} to maintain profit`,
+    },
+    {
+      title: 'Increase Avg Revenue by 15%',
+      tag: 'GROWTH', tagColor: SAGE,
+      icon: ArrowUpRight,
+      before: { avgNet: Math.round(avgMonthlyNet), netProfit: currentNetProfit },
+      after: {
+        avgNet: Math.round(avgMonthlyNet * 1.15),
+        netProfit: Math.round(avgMonthlyNet * 1.15 * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total),
+      },
+      impact: `New monthly net profit: ${aed(Math.round(avgMonthlyNet * 1.15 * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total))}`,
+    },
+    {
+      title: 'Cut Marketing to AED 5,000/mo',
+      tag: 'SAVINGS', tagColor: GOLD,
+      icon: Target,
+      before: { costs: currentCosts, netProfit: currentNetProfit },
+      after: { costs: currentCosts - 5000, netProfit: currentNetProfit + 5000 },
+      impact: `Save ${aed(5000)}/mo but risk losing visibility. Net: ${aed(currentNetProfit + 5000)}/mo`,
+    },
+    {
+      title: 'Double the Foot Traffic',
+      tag: 'OPTIMISTIC', tagColor: STEEL,
+      icon: TrendingUp,
+      before: { avgNet: Math.round(avgMonthlyNet) },
+      after: { avgNet: Math.round(avgMonthlyNet * 2) },
+      impact: `Projected monthly revenue: ${aed(Math.round(avgMonthlyNet * 2))}. Annual: ${aed(Math.round(avgMonthlyNet * 2 * 12))}`,
+    },
+  ];
+
+  const toggleScenario = (idx: number) => {
+    setActiveScenarios(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  };
+
+  // Comparison chart: current vs best case
+  const bestCaseGP = Math.round(avgMonthlyNet * 1.15 * (PNL.grossMargin / 100));
+  const bestCaseCosts = currentCosts - 5000;
+  const bestCaseNet = bestCaseGP - bestCaseCosts;
+  const comparisonData = MONTHS.map((m, i) => ({
+    month: m,
+    current: NET[i],
+    bestCase: Math.round(NET[i] * 1.15),
+  }));
+
+  return (
+    <div>
+      {/* 6 scenario cards */}
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        {scenarios.map((s, i) => (
+          <div key={i} style={{
+            background: CARD_BG, border: `1px solid ${activeScenarios.has(i) ? `${s.tagColor}44` : BORDER}`,
+            borderRadius: 10, padding: 16, cursor: 'pointer', transition: 'border-color 0.2s',
+          }} onClick={() => toggleScenario(i)}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <s.icon size={14} style={{ color: s.tagColor, opacity: 0.8 }} />
+              <span style={{
+                padding: '2px 6px', borderRadius: 4, fontSize: 7, fontWeight: 700, letterSpacing: '0.06em',
+                background: `${s.tagColor}22`, color: s.tagColor,
+              }}>{s.tag}</span>
+            </div>
+            <div style={{ fontSize: 11, color: T1, fontWeight: 500, marginBottom: 8, lineHeight: 1.4 }}>{s.title}</div>
+            <div style={{ fontSize: 9, color: T2, lineHeight: 1.6, marginBottom: 10 }}>{s.impact}</div>
+            <div style={{
+              padding: '4px 8px', borderRadius: 6, fontSize: 9, fontWeight: 600, textAlign: 'center',
+              background: activeScenarios.has(i) ? `${s.tagColor}22` : 'rgba(255,255,255,0.03)',
+              color: activeScenarios.has(i) ? s.tagColor : T3, border: `1px solid ${activeScenarios.has(i) ? `${s.tagColor}44` : BORDER}`,
+            }}>
+              {activeScenarios.has(i) ? 'Applied' : 'Apply Scenario'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Comparison chart */}
+      <ChartCard title="Current vs Best-Case Scenario (6 Months)" className="mb-3">
+        <ResponsiveContainer width="100%" height={280}>
+          <ComposedChart data={comparisonData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="month" tick={axisTick} />
+            <YAxis tick={axisTick} tickFormatter={v => aedK(v)} />
+            <Tooltip content={<AEDTooltip />} />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: T2 }} />
+            <Bar dataKey="current" name="Current" fill={GOLD} radius={[3, 3, 0, 0]} barSize={20} />
+            <Line dataKey="bestCase" name="Best Case (+15%)" stroke={SAGE} strokeWidth={2} dot={{ r: 3, fill: SAGE }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      {/* Net impact scorecard */}
+      <ChartCard title="Net Impact Scorecard" wide>
+        <div className="grid grid-cols-3 gap-3">
+          <div style={{ padding: 20, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 8 }}>Current Monthly Net Profit</div>
+            <div style={{ fontSize: 28, fontFamily: 'Georgia, serif', color: T1, lineHeight: 1 }}>{aed(currentNetProfit)}</div>
+            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>At {PNL.grossMargin}% margin, {aed(currentCosts)} costs</div>
+          </div>
+          <div style={{ padding: 20, background: 'rgba(88,152,122,0.04)', borderRadius: 8, textAlign: 'center', border: `1px solid rgba(88,152,122,0.15)` }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: SAGE, marginBottom: 8 }}>Best Case (All Improvements)</div>
+            <div style={{ fontSize: 28, fontFamily: 'Georgia, serif', color: SAGE, lineHeight: 1 }}>{aed(bestCaseNet)}</div>
+            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>+15% revenue, {aed(5000)} marketing cut</div>
+          </div>
+          <div style={{ padding: 20, background: 'rgba(191,95,89,0.04)', borderRadius: 8, textAlign: 'center', border: `1px solid rgba(191,95,89,0.15)` }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: ROSE, marginBottom: 8 }}>Worst Case (All Deteriorations)</div>
+            <div style={{ fontSize: 28, fontFamily: 'Georgia, serif', color: ROSE, lineHeight: 1 }}>{aed(currentNetProfit - 7000)}</div>
+            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>+{aed(4000)} rent, +{aed(3000)} staff</div>
+          </div>
+        </div>
+      </ChartCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE 14: WEEKLY PERFORMANCE
+// ══════════════════════════════════════════════════════════════════
+function WeeklyPage() {
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthColors = [GOLD, SAGE, ROSE, STEEL, AMBER, GOLD_DIM];
+
+  // Aggregate DAILY data into weeks
+  const weeklyAgg: { weekLabel: string; total: number; monthIdx: number; weekNum: number }[] = [];
+  let globalWeekNum = 0;
+  DAILY.forEach((monthData, mi) => {
+    let dayIdx = 0;
+    let weekTotal = 0;
+    const startDow = monthData.startDay;
+    // Days before start of month belong to previous week (padding)
+    let weekDayCount = startDow; // count of days accumulated in current week (from prev month padding)
+    while (dayIdx < monthData.values.length) {
+      weekTotal += monthData.values[dayIdx];
+      weekDayCount++;
+      if (weekDayCount >= 7) {
+        weeklyAgg.push({
+          weekLabel: `${MONTHS[mi]}W${Math.floor(dayIdx / 7) + 1}`,
+          total: weekTotal,
+          monthIdx: mi,
+          weekNum: globalWeekNum,
+        });
+        globalWeekNum++;
+        weekTotal = 0;
+        weekDayCount = 0;
+      }
+      dayIdx++;
+    }
+    if (weekDayCount > 0) {
+      weeklyAgg.push({
+        weekLabel: `${MONTHS[mi]}W${Math.floor(dayIdx / 7) + 1}`,
+        total: weekTotal,
+        monthIdx: mi,
+        weekNum: globalWeekNum,
+      });
+      globalWeekNum++;
+    }
+  });
+
+  // Day-of-week analysis
+  const dowStats = dayNames.map((name, dow) => {
+    const dayVals: number[] = [];
+    const monthAvg = avgMonthlyNet / 30;
+    DAILY.forEach(monthData => {
+      let dayIdx = 0;
+      let currentDow = monthData.startDay;
+      while (dayIdx < monthData.values.length) {
+        if (currentDow === dow) dayVals.push(monthData.values[dayIdx]);
+        dayIdx++;
+        currentDow = (currentDow + 1) % 7;
+      }
+    });
+    const avg = dayVals.length ? dayVals.reduce((a, b) => a + b, 0) / dayVals.length : 0;
+    const best = dayVals.length ? Math.max(...dayVals) : 0;
+    const aboveAvg = dayVals.filter(v => v > monthAvg).length;
+    return { day: name, avg: Math.round(avg), best, count: dayVals.length, aboveAvg, belowAvg: dayVals.length - aboveAvg };
+  });
+
+  const totalWeeks = weeklyAgg.length;
+  const weekTotals = weeklyAgg.map(w => w.total);
+  const bestWeek = Math.max(...weekTotals);
+  const worstWeek = Math.min(...weekTotals);
+  const avgWeekly = Math.round(weekTotals.reduce((a, b) => a + b, 0) / totalWeeks);
+  const bestWeekLabel = weeklyAgg.find(w => w.total === bestWeek)?.weekLabel || '';
+  const worstWeekLabel = weeklyAgg.find(w => w.total === worstWeek)?.weekLabel || '';
+
+  return (
+    <div>
+      {/* Key stats */}
+      <div className="grid grid-cols-5 gap-3 mb-4">
+        <KpiCard label="Total Weeks" value={`${totalWeeks}`} sub="Across 6 months" />
+        <KpiCard label="Best Week" value={aed(bestWeek)} sub={bestWeekLabel} badge="Peak" badgeColor={SAGE} />
+        <KpiCard label="Worst Week" value={aed(worstWeek)} sub={worstWeekLabel} badgeColor={ROSE} />
+        <KpiCard label="Avg Weekly Revenue" value={aed(avgWeekly)} sub={pct(avgWeekly > 0 ? 1 : 0)} />
+        <KpiCard label="Week Range" value={aed(bestWeek - worstWeek)} sub={`Best − Worst spread`} />
+      </div>
+
+      {/* Week-over-week bar chart */}
+      <ChartCard title="Weekly Revenue by Month" className="mb-3">
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={weeklyAgg} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="weekLabel" tick={axisTick} interval={2} fontSize={8} />
+            <YAxis tick={axisTick} tickFormatter={v => aedK(v)} />
+            <Tooltip content={<AEDTooltip />} />
+            <Bar dataKey="total" name="Weekly Revenue" radius={[3, 3, 0, 0]}>
+              {weeklyAgg.map((w, i) => <Cell key={i} fill={monthColors[w.monthIdx]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        {/* Month legend */}
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 8 }}>
+          {MONTHS.map((m, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: monthColors[i] }} />
+              <span style={{ fontSize: 8, color: T3 }}>{m}</span>
+            </div>
+          ))}
+        </div>
+      </ChartCard>
+
+      {/* Day-of-week grid + Weekly trend */}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <ChartCard title="Day-of-Week Performance">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+            {dowStats.map((d, i) => (
+              <div key={i} style={{ textAlign: 'center', padding: '10px 4px', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                <div style={{ fontSize: 9, color: T3, marginBottom: 6, fontWeight: 500 }}>{d.day}</div>
+                <div style={{ fontSize: 14, fontFamily: 'Georgia, serif', color: T1, lineHeight: 1 }}>{aed(d.avg)}</div>
+                <div style={{ fontSize: 8, color: T3, marginTop: 4 }}>avg/day</div>
+                <div style={{ fontSize: 8, color: SAGE, marginTop: 2 }}>{aed(d.best)}</div>
+                <div style={{ fontSize: 7, color: T3, marginTop: 4 }}>{d.aboveAvg}↑ {d.belowAvg}↓</div>
+              </div>
+            ))}
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Weekly Trend">
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={weeklyAgg} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="weekLabel" tick={axisTick} interval={4} fontSize={8} />
+              <YAxis tick={axisTick} tickFormatter={v => aedK(v)} />
+              <Tooltip content={<AEDTooltip />} />
+              <Line dataKey="total" name="Weekly Total" stroke={GOLD} strokeWidth={2} dot={{ r: 2, fill: GOLD }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // PAGE 11: DATA INTELLIGENCE & RECOMMENDATIONS
 // ══════════════════════════════════════════════════════════════════
 function GapsPage() {
@@ -1853,11 +2325,14 @@ const pageComponents: Record<PageId, React.FC> = {
   pnl: PnlPage,
   capex: CapexPage,
   payback: PaybackPage,
+  breakeven: BreakevenPage,
   revenue: RevenuePage,
   heatmap: HeatmapPage,
+  weekly: WeeklyPage,
   returns: ReturnsPage,
   payments: PaymentsPage,
   forecast: ForecastPage,
+  simulator: SimulatorPage,
   gaps: GapsPage,
 };
 

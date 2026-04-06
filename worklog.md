@@ -81,3 +81,24 @@ Replace the existing GapsPage in the Parfumix ADCB dashboard with a comprehensiv
 - Priority badges use color coding: CRITICAL=ROSE, HIGH=AMBER, MEDIUM=GOLD, LOW=T3
 - ESLint passes with zero errors
 - Dev server compiles and returns 200 status
+
+---
+## Task ID: 6 - fullstack-developer
+### Work Task
+Add 3 new high-impact dashboard pages: Breakeven Calculator, What-If Simulator, and Weekly Performance.
+
+### Work Summary
+- Added 3 new page IDs to `PageId` type: 'breakeven', 'simulator', 'weekly'
+- Added 3 new navigation items to `navSections`:
+  - Breakeven (Calculator icon) in "Unit Economics" section after Payback Analysis
+  - Weekly (BarChart2 icon) in "Sales" section after Daily Heatmap
+  - What-If (Zap icon) in "Strategy" section before Data Gaps
+- Added 3 new page components (~470 lines total) before GapsPage:
+  1. **BreakevenPage** (PAGE 12): Interactive calculator with 3 range sliders (fixed costs, margin%, target profit), 4 live KPI cards, GaugeBar visual meter, breakeven sensitivity table across 5 margin levels, fixed cost donut chart. Custom CSS for styled range inputs.
+  2. **SimulatorPage** (PAGE 13): 6 scenario cards in 2x3 grid (rent increase, return reduction, staff addition, revenue growth, marketing cut, foot traffic doubling) with click-to-toggle states, ComposedChart comparing current vs best-case across 6 months, net impact scorecard showing current/best/worst case monthly net profit.
+  3. **WeeklyPage** (PAGE 14): Weekly aggregation from DAILY data into calendar weeks, week-over-week bar chart color-coded by month (6 colors), day-of-week performance grid (avg, best, above/below avg counts), weekly trend line chart, 5 key stats (total weeks, best/worst week, avg weekly, range).
+- Added `GaugeBar` helper component: horizontal bar showing current value vs target with percentage indicator
+- Added all 3 pages to `pageComponents` record map
+- No existing page functions were modified
+- No new imports needed (all icons and recharts components already imported)
+- ESLint passes with zero errors
