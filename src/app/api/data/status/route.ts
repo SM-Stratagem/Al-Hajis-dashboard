@@ -1,17 +1,29 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-export async function GET() {
-  const monthly = await db.monthlySale.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
-  const daily = await db.dailySale.findMany({ orderBy: { date: 'asc' } });
-  const capex = await db.capexItem.findMany();
-  const overheads = await db.overhead.findMany();
-  const pnl = await db.pnlPeriod.findMany({ include: { expenses: true } });
-  const products = await db.productSale.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
-  const staffCosts = await db.staffCost.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
-  const marketing = await db.marketingSpend.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
-  const transactions = await db.transactionSummary.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
-  const uploads = await db.dataUpload.findMany({ orderBy: { createdAt: 'desc' }, take: 20 });
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchSlug = searchParams.get('branchSlug');
+
+  let branchWhere: any = {};
+  if (branchSlug) {
+    const branch = await db.branch.findUnique({ where: { slug: branchSlug } });
+    if (branch) branchWhere = { branchId: branch.id };
+  }
+
+  const monthly = await db.monthlySale.findMany({ where: branchWhere, orderBy: [{ year: 'asc' }, { month: 'asc' }] });
+  const daily = await db.dailySale.findMany({
+    where: branchWhere.branchId ? { monthlySale: { branchId: branchWhere.branchId } } : {},
+    orderBy: { date: 'asc' },
+  });
+  const capex = await db.capexItem.findMany({ where: branchWhere });
+  const overheads = await db.overhead.findMany({ where: branchWhere });
+  const pnl = await db.pnlPeriod.findMany({ where: branchWhere, include: { expenses: true } });
+  const products = await db.productSale.findMany({ where: branchWhere, orderBy: [{ year: 'asc' }, { month: 'asc' }] });
+  const uploads = await db.dataUpload.findMany({
+    where: branchWhere.branchId ? { branchId: branchWhere.branchId } : {},
+    orderBy: { createdAt: 'desc' }, take: 20,
+  });
 
   return NextResponse.json({
     counts: {
@@ -21,9 +33,6 @@ export async function GET() {
       overheads: overheads.length,
       pnlPeriods: pnl.length,
       products: products.length,
-      staffCosts: staffCosts.length,
-      marketingSpends: marketing.length,
-      transactionSummaries: transactions.length,
     },
     hasData: {
       monthlySales: monthly.length > 0,
@@ -32,9 +41,6 @@ export async function GET() {
       overheads: overheads.length > 0,
       pnl: pnl.length > 0,
       products: products.length > 0,
-      staffCosts: staffCosts.length > 0,
-      marketing: marketing.length > 0,
-      transactions: transactions.length > 0,
     },
     recentUploads: uploads,
   });

@@ -2,14 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { parseCSV, toNumber } from '@/lib/csv-parser';
 
-export async function GET() {
-  const data = await db.transactionSummary.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchSlug = searchParams.get('branchSlug');
+
+  let where: any = {};
+  if (branchSlug) {
+    const branch = await db.branch.findUnique({ where: { slug: branchSlug } });
+    if (branch) {
+      where.monthlySale = { branchId: branch.id };
+    }
+  }
+
+  const data = await db.transactionSummary.findMany({ where, orderBy: [{ year: 'asc' }, { month: 'asc' }] });
   return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const branchId = body.branchId;
+    if (!branchId) return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
 
     if (body.csv) {
       const { rows } = parseCSV(body.csv);
@@ -23,7 +36,7 @@ export async function POST(req: NextRequest) {
         const avgTicketSize = receiptCount > 0 ? totalRevenue / receiptCount : null;
         if (!month || !year || !receiptCount) continue;
 
-        const ms = await db.monthlySale.findFirst({ where: { month, year } });
+        const ms = await db.monthlySale.findFirst({ where: { month, year, branchId } });
 
         const data = await db.transactionSummary.create({
           data: { month, year, receiptCount, totalRevenue, avgTicketSize, monthlySaleId: ms?.id || '' },
@@ -32,7 +45,7 @@ export async function POST(req: NextRequest) {
       }
 
       await db.dataUpload.create({
-        data: { category: 'transactions', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
+        data: { branchId, category: 'transactions', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
       });
 
       return NextResponse.json({ success: true, count: created.length });
@@ -50,7 +63,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
   await db.transactionSummary.deleteMany({});
   return NextResponse.json({ success: true });
 }

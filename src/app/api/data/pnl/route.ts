@@ -2,17 +2,31 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { parseCSV, toNumber } from '@/lib/csv-parser';
 
-export async function GET() {
-  const data = await db.pnlPeriod.findMany({ include: { expenses: true }, orderBy: { createdAt: 'desc' } });
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchSlug = searchParams.get('branchSlug');
+
+  let where: any = {};
+  if (branchSlug) {
+    const branch = await db.branch.findUnique({ where: { slug: branchSlug } });
+    if (branch) where.branchId = branch.id;
+  }
+
+  const data = await db.pnlPeriod.findMany({
+    where,
+    include: { expenses: true },
+    orderBy: { createdAt: 'desc' },
+  });
   return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const branchId = body.branchId;
+    if (!branchId) return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
 
     if (body.csv) {
-      // CSV with expense lines
       const { rows } = parseCSV(body.csv);
       const expenses = [];
 
@@ -28,6 +42,7 @@ export async function POST(req: NextRequest) {
 
       const pnl = await db.pnlPeriod.create({
         data: {
+          branchId,
           period: body.period || 'Uploaded P&L',
           revenue: toNumber(String(body.revenue || body.totalRevenue)),
           cogsGoods: toNumber(String(body.cogsGoods || body.cogs_goods || 0)),
@@ -42,19 +57,19 @@ export async function POST(req: NextRequest) {
       });
 
       await db.dataUpload.create({
-        data: { category: 'pnl', fileName: body.fileName || 'upload.csv', rowCount: expenses.length, status: 'success' },
+        data: { branchId, category: 'pnl', fileName: body.fileName || 'upload.csv', rowCount: expenses.length, status: 'success' },
       });
 
       return NextResponse.json({ success: true, pnlId: pnl.id, expenseCount: expenses.length });
     }
 
-    // JSON mode with embedded expenses
     if (body.period) {
       const expenses = body.expenses || [];
       const totalExpenses = expenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
 
       const pnl = await db.pnlPeriod.create({
         data: {
+          branchId,
           period: body.period,
           revenue: body.revenue || 0,
           cogsGoods: body.cogsGoods || 0,
@@ -77,8 +92,12 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE() {
-  await db.pnlExpense.deleteMany({});
-  await db.pnlPeriod.deleteMany({});
+export async function DELETE(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchId = searchParams.get('branchId');
+  await db.pnlExpense.deleteMany({
+    where: branchId ? { pnlPeriod: { branchId } } : {},
+  });
+  await db.pnlPeriod.deleteMany({ where: branchId ? { branchId } : {} });
   return NextResponse.json({ success: true });
 }

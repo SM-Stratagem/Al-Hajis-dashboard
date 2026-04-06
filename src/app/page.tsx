@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   ComposedChart, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -8,11 +8,16 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, AlertTriangle, DollarSign, PieChartIcon, TrendingUp,
-  CalendarDays, RotateCcw, CreditCard, BarChart3, Database, ChevronRight,
+  CalendarDays, RotateCcw, CreditCard, BarChart3, Database, ChevronRight, ChevronDown,
   Activity, Target, Zap, Eye, Clock, ShoppingCart, ArrowUpRight, ArrowDownRight,
   CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt,
   Store, Calculator, ClipboardList, ArrowRight, Upload, FileSpreadsheet, RefreshCw, Download,
 } from 'lucide-react';
+
+// ══════════════════════════════════════════════════════════════════
+// BRANCH IMPORTS
+// ══════════════════════════════════════════════════════════════════
+import { BRANCHES, COUNTRIES, type BranchDef, type CountryDef, DEFAULT_BRANCH_SLUG, getBranchBySlug } from '@/lib/branches';
 
 // ══════════════════════════════════════════════════════════════════
 // DATA IMPORTS — all from @/lib/data, DO NOT recreate
@@ -198,8 +203,9 @@ function buildCapexByCategory(items: { name: string; amount: number; category: s
   return Object.entries(cats).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 }
 
-function useStoreData(): { loading: boolean } & StoreData {
+function useStoreData(branchSlug: string = DEFAULT_BRANCH_SLUG): { loading: boolean; hasData: boolean } & StoreData {
   const [loading, setLoading] = useState(true);
+  const [hasData, setHasData] = useState(true);
   const [data, setData] = useState<StoreData>({
     months: [...MONTHS], monthsFull: [...MONTHS_FULL],
     gross: [...GROSS], returns: [...RETURNS], net: [...NET], cash: [...CASH], card: [...CARD],
@@ -219,14 +225,16 @@ function useStoreData(): { loading: boolean } & StoreData {
   useEffect(() => {
     async function fetchData() {
       try {
+        const qs = branchSlug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(branchSlug)}` : '';
         const [msRes, dailyRes, capexRes, ohRes, pnlRes] = await Promise.all([
-          fetch('/api/data/monthly-sales').then(r => r.json()),
-          fetch('/api/data/daily-sales').then(r => r.json()),
-          fetch('/api/data/capex').then(r => r.json()),
-          fetch('/api/data/overheads').then(r => r.json()),
-          fetch('/api/data/pnl').then(r => r.json()),
+          fetch(`/api/data/monthly-sales${qs}`).then(r => r.json()).catch(() => []),
+          fetch(`/api/data/daily-sales${qs}`).then(r => r.json()).catch(() => []),
+          fetch(`/api/data/capex${qs}`).then(r => r.json()).catch(() => []),
+          fetch(`/api/data/overheads${qs}`).then(r => r.json()).catch(() => []),
+          fetch(`/api/data/pnl${qs}`).then(r => r.json()).catch(() => []),
         ]);
-        if (msRes.length > 0) {
+        if (msRes && msRes.length > 0) {
+          setHasData(true);
           const months = msRes.map((ms: any) => `${MN[ms.month - 1]} ${String(ms.year).slice(2)}`);
           const monthsFull = msRes.map((ms: any) => `${MNF[ms.month - 1]} ${ms.year}`);
           const gross = msRes.map((ms: any) => ms.gross);
@@ -269,14 +277,82 @@ function useStoreData(): { loading: boolean } & StoreData {
             monthlyData: buildMonthlyData(months, monthsFull, gross, returns, net, cash, card, d.cumulativeNet, d.returnRates, d.momGrowth, d.cardPct),
             capexByCategory: buildCapexByCategory(capexItems),
           });
+        } else if (msRes && msRes.length === 0) {
+          setHasData(false);
         }
       } catch (e) { console.error('Failed to fetch store data:', e); }
       finally { setLoading(false); }
     }
     fetchData();
-  }, []);
+  }, [branchSlug]);
 
-  return { loading, ...data };
+  return { loading, hasData, ...data };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BRANCH VIEW MODE
+// ══════════════════════════════════════════════════════════════════
+type ViewMode = { type: 'all' } | { type: 'country'; country: string; flag: string } | { type: 'city'; city: string; country: string; flag: string } | { type: 'branch'; slug: string };
+
+const BRANCH_LS_KEY = 'parfumix:selectedView';
+
+function loadViewMode(): ViewMode {
+  if (typeof window === 'undefined') return { type: 'branch', slug: DEFAULT_BRANCH_SLUG };
+  try {
+    const stored = localStorage.getItem(BRANCH_LS_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed.type === 'branch' && parsed.slug) return parsed;
+      if (parsed.type === 'all') return { type: 'all' };
+      if (parsed.type === 'country') return parsed;
+      if (parsed.type === 'city') return parsed;
+    }
+  } catch {}
+  return { type: 'branch', slug: DEFAULT_BRANCH_SLUG };
+}
+
+function saveViewMode(view: ViewMode) {
+  if (typeof window === 'undefined') return;
+  try { localStorage.setItem(BRANCH_LS_KEY, JSON.stringify(view)); } catch {}
+}
+
+function getViewLabel(view: ViewMode): string {
+  switch (view.type) {
+    case 'all': return '🌍 All Branches';
+    case 'country': return `${view.flag} ${view.country} — All`;
+    case 'city': return `${view.flag} ${view.city} — All`;
+    case 'branch': {
+      const b = getBranchBySlug(view.slug);
+      return b ? b.name : 'Select Branch';
+    }
+  }
+}
+
+function getViewSubLabel(view: ViewMode): string {
+  switch (view.type) {
+    case 'all': return `${BRANCHES.length} branches across 3 countries`;
+    case 'country': {
+      const count = BRANCHES.filter(b => b.country === view.country).length;
+      return `${count} branch${count !== 1 ? 'es' : ''}`;
+    }
+    case 'city': {
+      const count = BRANCHES.filter(b => b.city === view.city).length;
+      return `${count} branch${count !== 1 ? 'es' : ''} in ${view.city}`;
+    }
+    case 'branch': {
+      const b = getBranchBySlug(view.slug);
+      return b ? `${b.flag} ${b.city}, ${b.country}` : '';
+    }
+  }
+}
+
+function getBranchSlugForView(view: ViewMode): string | null {
+  if (view.type === 'branch') return view.slug;
+  return null;
+}
+
+function isAggregateView(view: ViewMode): boolean {
+  return view.type === 'all' || view.type === 'country' || view.type === 'city';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -380,9 +456,235 @@ const navSections = [
 ];
 
 // ══════════════════════════════════════════════════════════════════
+// BRANCH SELECTOR BAR
+// ══════════════════════════════════════════════════════════════════
+function BranchSelectorBar({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode) => void }) {
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const label = getViewLabel(view);
+  const subLabel = getViewSubLabel(view);
+  const isAggregate = isAggregateView(view);
+
+  // For non-ADCB individual branches, show index
+  const branchIndex = view.type === 'branch' ? BRANCHES.findIndex(b => b.slug === view.slug) + 1 : null;
+
+  return (
+    <div style={{
+      width: '100%', background: CARD_BG,
+      borderBottom: `1px solid ${BORDER}`,
+      position: 'relative', zIndex: 100,
+    }}>
+      <div style={{
+        maxWidth: 1600, margin: '0 auto',
+        display: 'flex', alignItems: 'center', gap: 16,
+        padding: '8px 20px', height: 44,
+      }}>
+        {/* Brand */}
+        <div style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', color: GOLD, fontSize: 16, letterSpacing: '0.02em', flexShrink: 0 }}>
+          parf&uuml;mix
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 20, background: BORDER, flexShrink: 0 }} />
+
+        {/* Selector trigger */}
+        <button onClick={() => setOpen(!open)} style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '5px 12px', borderRadius: 6,
+          background: isAggregate ? `${GOLD}15` : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${isAggregate ? `${GOLD}33` : BORDER}`,
+          color: isAggregate ? GOLD : T1, fontSize: 11, cursor: 'pointer',
+          fontFamily: 'inherit', transition: 'all 0.15s', flexShrink: 0,
+        }}>
+          {label}
+          <ChevronDown size={12} style={{ opacity: 0.6, transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+        </button>
+
+        {/* Current branch name pill */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px', borderRadius: 6,
+          background: 'rgba(201,165,90,0.06)',
+          border: `1px solid rgba(201,165,90,0.1)`,
+          fontSize: 10, color: T2, flexShrink: 0,
+        }}>
+          <span style={{ color: T3 }}>{subLabel}</span>
+        </div>
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Right info */}
+        <div style={{ fontSize: 9, color: T3, flexShrink: 0 }}>
+          {view.type === 'branch' && branchIndex ? `${branchIndex} of ${BRANCHES.length} branches` : `Viewing ${view.type === 'all' ? 'all' : view.type}`}
+        </div>
+
+        {/* Aggregate badge */}
+        {isAggregate && (
+          <span style={{
+            padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 600,
+            background: `${GOLD}22`, color: GOLD, letterSpacing: '0.06em', flexShrink: 0,
+          }}>
+            AGGREGATE
+          </span>
+        )}
+      </div>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div ref={panelRef} style={{
+          position: 'absolute', top: '100%', left: 0, right: 0,
+          background: '#0c0c10',
+          borderBottom: `1px solid ${BORDER}`,
+          borderTop: `1px solid rgba(201,165,90,0.15)`,
+          maxHeight: 'calc(100vh - 44px)', overflowY: 'auto',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+          zIndex: 200,
+        }}>
+          <div style={{ maxWidth: 1600, margin: '0 auto', padding: '12px 20px 16px' }}>
+            {/* Global view */}
+            <button onClick={() => { onChange({ type: 'all' }); setOpen(false); }} style={{
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+              padding: '10px 14px', borderRadius: 8, border: 'none',
+              background: view.type === 'all' ? `${GOLD}15` : 'transparent',
+              color: view.type === 'all' ? GOLD : T1, fontSize: 12, cursor: 'pointer',
+              fontFamily: 'inherit', marginBottom: 4, textAlign: 'left',
+            }}>
+              <span style={{ width: 20, textAlign: 'center', fontSize: 14 }}>🌍</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500 }}>All Branches</div>
+                <div style={{ fontSize: 9, color: T3, marginTop: 1 }}>{BRANCHES.length} branches — overall dashboard</div>
+              </div>
+              {view.type === 'all' && <span style={{ fontSize: 9, color: GOLD }}>Active</span>}
+            </button>
+
+            <div style={{ height: 1, background: BORDER, margin: '8px 0 12px' }} />
+
+            {/* Countries */}
+            {COUNTRIES.map(country => (
+              <div key={country.name} style={{ marginBottom: 12 }}>
+                {/* Country header */}
+                <button onClick={() => { onChange({ type: 'country', country: country.name, flag: country.flag }); setOpen(false); }} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                  padding: '8px 14px', borderRadius: 8, border: 'none',
+                  background: (view.type === 'country' && view.country === country.name) ? `${GOLD}15` : 'transparent',
+                  color: (view.type === 'country' && view.country === country.name) ? GOLD : T1,
+                  fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', marginBottom: 2,
+                }}>
+                  <span style={{ width: 20, textAlign: 'center', fontSize: 14 }}>{country.flag}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{country.name}</div>
+                    <div style={{ fontSize: 9, color: T3, marginTop: 1 }}>{country.cities.reduce((s, c) => s + c.branches.length, 0)} branches &middot; {country.cities.length} {country.cities.length > 1 ? 'cities' : 'city'}</div>
+                  </div>
+                  <ChevronRight size={12} style={{ color: T3 }} />
+                </button>
+
+                {/* Cities within country */}
+                <div style={{ paddingLeft: 34 }}>
+                  {country.cities.map(city => (
+                    <div key={city.name}>
+                      {/* City header (only show if country has multiple cities) */}
+                      {country.cities.length > 1 && (
+                        <button onClick={() => { onChange({ type: 'city', city: city.name, country: country.name, flag: country.flag }); setOpen(false); }} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                          padding: '6px 10px', borderRadius: 6, border: 'none',
+                          background: (view.type === 'city' && view.city === city.name) ? `${GOLD}15` : 'transparent',
+                          color: (view.type === 'city' && view.city === city.name) ? GOLD : T2,
+                          fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', marginBottom: 2,
+                        }}>
+                          <span style={{ fontWeight: 500 }}>{city.name}</span>
+                          <span style={{ fontSize: 9, color: T3 }}>({city.branches.length})</span>
+                        </button>
+                      )}
+
+                      {/* Branches within city */}
+                      <div style={{ paddingLeft: country.cities.length > 1 ? 8 : 0 }}>
+                        {city.branches.map(branch => {
+                          const isActive = view.type === 'branch' && view.slug === branch.slug;
+                          return (
+                            <button key={branch.slug} onClick={() => { onChange({ type: 'branch', slug: branch.slug }); setOpen(false); }} style={{
+                              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                              padding: '5px 10px', borderRadius: 6, border: 'none',
+                              background: isActive ? `${GOLD}15` : 'transparent',
+                              color: isActive ? GOLD : T2, fontSize: 10, cursor: 'pointer',
+                              fontFamily: 'inherit', textAlign: 'left', marginBottom: 1,
+                            }}>
+                              <span style={{ width: 4, height: 4, borderRadius: '50%', background: isActive ? GOLD : T3, flexShrink: 0 }} />
+                              <span style={{ flex: 1 }}>{branch.name}</span>
+                              {branch.slug === 'adcb' && (
+                                <span style={{ padding: '1px 5px', borderRadius: 3, fontSize: 7, fontWeight: 700, background: `${SAGE}18`, color: SAGE, letterSpacing: '0.04em' }}>LIVE</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ height: 1, background: BORDER, margin: '8px 0 8px' }} />
+            <div style={{ padding: '4px 14px', fontSize: 8, color: T3 }}>
+              {BRANCHES.length} branches &middot; UAE {BRANCHES.filter(b => b.country === 'UAE').length} &middot; Oman {BRANCHES.filter(b => b.country === 'Oman').length} &middot; Bahrain {BRANCHES.filter(b => b.country === 'Bahrain').length}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// NO DATA PLACEHOLDER
+// ══════════════════════════════════════════════════════════════════
+function NoDataPage({ view }: { view: ViewMode }) {
+  const label = getViewLabel(view);
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      minHeight: 500, textAlign: 'center', padding: 40,
+    }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: '50%',
+        background: 'rgba(201,165,90,0.08)', border: `1px solid rgba(201,165,90,0.15)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20,
+      }}>
+        <Database size={24} style={{ color: GOLD, opacity: 0.6 }} />
+      </div>
+      <h2 style={{ fontSize: 16, color: T1, marginBottom: 8, fontWeight: 500 }}>No Data Available</h2>
+      <p style={{ fontSize: 12, color: T2, maxWidth: 400, lineHeight: 1.7, marginBottom: 16 }}>
+        {view.type === 'branch'
+          ? `Data for this branch has not been loaded yet. Use the Data Center to seed or upload data.`
+          : `${label} — Aggregate views are coming soon. For now, select an individual branch.`
+        }
+      </p>
+      <div style={{
+        padding: '8px 16px', borderRadius: 6,
+        background: 'rgba(201,165,90,0.08)', border: `1px solid rgba(201,165,90,0.15)`,
+        fontSize: 10, color: GOLD,
+      }}>
+        {view.type === 'branch' ? 'Go to Data Center → Load Existing Data' : 'Coming Soon'}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // SIDEBAR
 // ══════════════════════════════════════════════════════════════════
-function Sidebar({ active, onChange }: { active: PageId; onChange: (p: PageId) => void }) {
+function Sidebar({ active, onChange, branchLabel }: { active: PageId; onChange: (p: PageId) => void; branchLabel: string }) {
   return (
     <aside style={{
       width: 220, minHeight: '100vh', position: 'sticky', top: 0,
@@ -396,7 +698,7 @@ function Sidebar({ active, onChange }: { active: PageId; onChange: (p: PageId) =
           parf&uuml;mix
         </div>
         <div style={{ fontSize: 9, color: T3, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-          branch intelligence &middot; adcb
+          branch intelligence
         </div>
       </div>
 
@@ -405,8 +707,9 @@ function Sidebar({ active, onChange }: { active: PageId; onChange: (p: PageId) =
         <div style={{
           display: 'inline-block', padding: '4px 10px', borderRadius: 6,
           background: 'rgba(201,165,90,0.08)', fontSize: 9, color: GOLD,
+          maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          ADCB Mall &middot; Dubai, UAE
+          {branchLabel}
         </div>
       </div>
 
@@ -3132,46 +3435,79 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
 
 export default function Home() {
   const [activePage, setActivePage] = useState<PageId>('dashboard');
-  const storeData = useStoreData();
+  const [view, setView] = useState<ViewMode>(loadViewMode);
+
+  const handleViewChange = useCallback((newView: ViewMode) => {
+    setView(newView);
+    saveViewMode(newView);
+  }, []);
+
+  const branchSlug = useMemo(() => getBranchSlugForView(view), [view]);
+  const storeData = useStoreData(branchSlug || DEFAULT_BRANCH_SLUG);
   const PageComponent = pageComponents[activePage];
+
+  const sidebarLabel = useMemo(() => {
+    if (view.type === 'branch') {
+      const b = getBranchBySlug(view.slug);
+      return b ? `${b.name.replace('Parfumix ', '')} · ${b.city}, ${b.country}` : 'Select Branch';
+    }
+    return getViewLabel(view);
+  }, [view]);
+
+  // Determine if we should show data or placeholder
+  const showNoData = !storeData.loading && (!storeData.hasData || isAggregateView(view));
 
   if (storeData.loading) {
     return (
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar active={activePage} onChange={setActivePage} />
-        <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <RefreshCw size={28} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} />
-            <div style={{ fontSize: 12, color: T3, marginTop: 16 }}>Loading dashboard data…</div>
-          </div>
-        </main>
+      <div>
+        <BranchSelectorBar view={view} onChange={handleViewChange} />
+        <div style={{ display: 'flex', minHeight: 'calc(100vh - 44px)' }}>
+          <Sidebar active={activePage} onChange={setActivePage} branchLabel={sidebarLabel} />
+          <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ textAlign: 'center' }}>
+              <RefreshCw size={28} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} />
+              <div style={{ fontSize: 12, color: T3, marginTop: 16 }}>Loading dashboard data…</div>
+            </div>
+          </main>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar active={activePage} onChange={setActivePage} />
-      <main style={{
-        flex: 1, padding: '24px 28px', maxWidth: 1200, minWidth: 0,
-        overflowX: 'hidden',
-      }}>
-        {/* Page header */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {navSections.flatMap(s => s.items).find(i => i.id === activePage) && (() => {
-              const navItem = navSections.flatMap(s => s.items).find(i => i.id === activePage)!;
-              return <navItem.icon size={14} style={{ color: GOLD, opacity: 0.7 }} />;
-            })()}
-            <h1 style={{ fontSize: 16, color: T1, fontWeight: 500 }}>
-              {navSections.flatMap(s => s.items).find(i => i.id === activePage)?.label || 'Dashboard'}
-            </h1>
+    <div style={{ minHeight: '100vh' }}>
+      <BranchSelectorBar view={view} onChange={handleViewChange} />
+      <div style={{ display: 'flex', minHeight: 'calc(100vh - 44px)' }}>
+        <Sidebar active={activePage} onChange={setActivePage} branchLabel={sidebarLabel} />
+        <main style={{
+          flex: 1, padding: '24px 28px', maxWidth: 1200, minWidth: 0,
+          overflowX: 'hidden',
+        }}>
+          {/* Page header */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              {navSections.flatMap(s => s.items).find(i => i.id === activePage) && (() => {
+                const navItem = navSections.flatMap(s => s.items).find(i => i.id === activePage)!;
+                return <navItem.icon size={14} style={{ color: GOLD, opacity: 0.7 }} />;
+              })()}
+              <h1 style={{ fontSize: 16, color: T1, fontWeight: 500 }}>
+                {navSections.flatMap(s => s.items).find(i => i.id === activePage)?.label || 'Dashboard'}
+              </h1>
+              {isAggregateView(view) && (
+                <span style={{
+                  marginLeft: 8, padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 600,
+                  background: `${GOLD}22`, color: GOLD, letterSpacing: '0.06em',
+                }}>
+                  {view.type === 'all' ? 'ALL BRANCHES' : view.type === 'country' ? view.country.toUpperCase() : view.city.toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div style={{ width: 40, height: 2, background: GOLD, borderRadius: 1, opacity: 0.4 }} />
           </div>
-          <div style={{ width: 40, height: 2, background: GOLD, borderRadius: 1, opacity: 0.4 }} />
-        </div>
 
-        <PageComponent data={storeData} />
-      </main>
+          {showNoData ? <NoDataPage view={view} /> : <PageComponent data={storeData} />}
+        </main>
+      </div>
     </div>
   );
 }

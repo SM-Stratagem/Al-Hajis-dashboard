@@ -2,19 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { parseCSV, toNumber } from '@/lib/csv-parser';
 
-export async function GET() {
-  const data = await db.capexItem.findMany({ orderBy: { amount: 'desc' } });
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchSlug = searchParams.get('branchSlug');
+
+  let where: any = {};
+  if (branchSlug) {
+    const branch = await db.branch.findUnique({ where: { slug: branchSlug } });
+    if (branch) where.branchId = branch.id;
+  }
+
+  const data = await db.capexItem.findMany({ where, orderBy: { amount: 'desc' } });
   return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const branchId = body.branchId;
+    if (!branchId) return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
 
     if (body.csv) {
       const { rows } = parseCSV(body.csv);
       const created = [];
-      await db.capexItem.deleteMany({});
+      await db.capexItem.deleteMany({ where: { branchId } });
 
       for (const row of rows) {
         const name = row.name || row.item || row.description || '';
@@ -22,20 +33,20 @@ export async function POST(req: NextRequest) {
         const category = row.category || row.type || row.cat || 'Other';
         if (!name || !amount) continue;
 
-        const data = await db.capexItem.create({ data: { name, amount, category } });
+        const data = await db.capexItem.create({ data: { name, amount, category, branchId } });
         created.push(data);
       }
 
       await db.dataUpload.create({
-        data: { category: 'capex', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
+        data: { branchId, category: 'capex', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
       });
 
       return NextResponse.json({ success: true, count: created.length });
     }
 
     if (Array.isArray(body)) {
-      await db.capexItem.deleteMany({});
-      await db.capexItem.createMany({ data: body });
+      await db.capexItem.deleteMany({ where: { branchId } });
+      await db.capexItem.createMany({ data: body.map((i: any) => ({ ...i, branchId })) });
       return NextResponse.json({ success: true, count: body.length });
     }
 
@@ -45,7 +56,9 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE() {
-  await db.capexItem.deleteMany({});
+export async function DELETE(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchId = searchParams.get('branchId');
+  await db.capexItem.deleteMany({ where: branchId ? { branchId } : {} });
   return NextResponse.json({ success: true });
 }

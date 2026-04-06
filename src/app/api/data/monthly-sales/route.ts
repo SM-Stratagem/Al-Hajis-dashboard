@@ -2,21 +2,46 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { parseCSV, toNumber } from '@/lib/csv-parser';
 
-export async function GET() {
-  const data = await db.monthlySale.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] });
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const branchId = searchParams.get('branchId');
+  const branchSlug = searchParams.get('branchSlug');
+
+  let where: any = {};
+  if (branchId) {
+    where.branchId = branchId;
+  } else if (branchSlug) {
+    const branch = await db.branch.findUnique({ where: { slug: branchSlug } });
+    if (branch) where.branchId = branch.id;
+  }
+
+  const data = await db.monthlySale.findMany({
+    where,
+    orderBy: [{ year: 'asc' }, { month: 'asc' }],
+  });
   return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const branchId = body.branchId;
+
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
+    }
+
+    // Verify branch exists
+    const branch = await db.branch.findUnique({ where: { id: branchId } });
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found' }, { status: 404 });
+    }
 
     if (body.csv) {
-      // CSV upload mode
-      const { headers, rows } = parseCSV(body.csv);
+      const { rows } = parseCSV(body.csv);
       const created = [];
 
-      await db.monthlySale.deleteMany({});
+      await db.monthlySale.deleteMany({ where: { branchId } });
 
       for (const row of rows) {
         const month = toNumber(row.month || row['month_num'] || row.m);
@@ -25,6 +50,7 @@ export async function POST(req: NextRequest) {
 
         const data = await db.monthlySale.create({
           data: {
+            branchId,
             month,
             year,
             gross: toNumber(row.gross || row.total_gross || row.gross_revenue),
@@ -38,16 +64,17 @@ export async function POST(req: NextRequest) {
       }
 
       await db.dataUpload.create({
-        data: { category: 'monthly-sales', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
+        data: { branchId, category: 'monthly-sales', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
       });
 
       return NextResponse.json({ success: true, count: created.length });
     }
 
-    // Direct JSON array mode
     if (Array.isArray(body)) {
-      await db.monthlySale.deleteMany({});
-      const created = await db.monthlySale.createMany({ data: body });
+      await db.monthlySale.deleteMany({ where: { branchId } });
+      const created = await db.monthlySale.createMany({
+        data: body.map((item: any) => ({ ...item, branchId })),
+      });
       return NextResponse.json({ success: true, count: created.count });
     }
 

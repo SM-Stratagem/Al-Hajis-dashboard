@@ -4,26 +4,33 @@ import { parseCSV, toNumber, parseDate } from '@/lib/csv-parser';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const month = searchParams.get('month');
-  const year = searchParams.get('year');
+  const branchSlug = searchParams.get('branchSlug');
 
-  const where: any = {};
-  if (month) where.month = parseInt(month);
-  if (year) where.year = parseInt(year);
+  let where: any = {};
+  if (branchSlug) {
+    const branch = await db.branch.findUnique({ where: { slug: branchSlug } });
+    if (branch) {
+      where.monthlySale = { branchId: branch.id };
+    }
+  }
 
-  const data = await db.dailySale.findMany({ where, orderBy: { date: 'asc' } });
+  const data = await db.dailySale.findMany({
+    where,
+    orderBy: { date: 'asc' },
+  });
   return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const branchId = body.branchId;
+    if (!branchId) return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
 
     if (body.csv) {
       const { rows } = parseCSV(body.csv);
       const created = [];
 
-      // Find or create the monthly sale record
       for (const row of rows) {
         const dateStr = row.date || row.day;
         const month = toNumber(row.month || row.m);
@@ -32,7 +39,6 @@ export async function POST(req: NextRequest) {
 
         if (!month || !year || !revenue) continue;
 
-        // Determine date string
         let date: string;
         let dayOfWeek: number;
         const parsed = parseDate(dateStr);
@@ -40,38 +46,28 @@ export async function POST(req: NextRequest) {
           date = parsed.date;
           dayOfWeek = parsed.dayOfWeek;
         } else {
-          // Use day number
           const day = toNumber(row.day_num || row.day_number || row.d);
           date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const d = new Date(year, month - 1, day);
           dayOfWeek = d.getDay();
         }
 
-        // Find matching monthly sale
-        const ms = await db.monthlySale.findFirst({ where: { month, year } });
+        const ms = await db.monthlySale.findFirst({ where: { month, year, branchId } });
         if (!ms) continue;
 
         const data = await db.dailySale.create({
-          data: {
-            date,
-            dayOfWeek,
-            revenue,
-            month,
-            year,
-            monthlySaleId: ms.id,
-          },
+          data: { date, dayOfWeek, revenue, month, year, monthlySaleId: ms.id },
         });
         created.push(data);
       }
 
       await db.dataUpload.create({
-        data: { category: 'daily-sales', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
+        data: { branchId, category: 'daily-sales', fileName: body.fileName || 'upload.csv', rowCount: created.length, status: 'success' },
       });
 
       return NextResponse.json({ success: true, count: created.length });
     }
 
-    // JSON array with monthlySaleId
     if (Array.isArray(body)) {
       const created = await db.dailySale.createMany({ data: body });
       return NextResponse.json({ success: true, count: created.count });

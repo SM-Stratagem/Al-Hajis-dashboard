@@ -16,11 +16,21 @@ datasource db {
 
 model Branch {
   id        String   @id @default(cuid())
-  name      String   @default("Parfumix ADCB")
-  location  String   @default("ADCB Mall, Dubai, UAE")
+  name      String
+  slug      String   @unique
+  city      String
+  country   String
+  flag      String   @default("🇦🇪")
   currency  String   @default("AED")
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  monthlySales      MonthlySale[]
+  capexItems        CapexItem[]
+  overheads         Overhead[]
+  pnlPeriods        PnlPeriod[]
+  productSales      ProductSale[]
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -39,12 +49,15 @@ model MonthlySale {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  branchId   String
+  branch     Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
   dailySales    DailySale[]
   staffCosts    StaffCost[]
   marketingSpends MarketingSpend[]
   transactions  TransactionSummary[]
 
-  @@unique([month, year])
+  @@unique([month, year, branchId])
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -63,7 +76,7 @@ model DailySale {
   monthlySaleId String
   monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
 
-  @@unique([date])
+  @@unique([date, monthlySaleId])
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -75,6 +88,9 @@ model CapexItem {
   name     String
   amount   Float
   category String  // Lease, Fit-out, Inventory, Tech, Legal, Deposits, People, Other
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -85,6 +101,9 @@ model Overhead {
   id     String @id @default(cuid())
   name   String
   amount Float
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -104,6 +123,9 @@ model PnlPeriod {
   netProfitLoss Float
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
   expenses PnlExpense[]
 }
@@ -140,6 +162,9 @@ model ProductSale {
   year        Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -161,7 +186,9 @@ model StaffCost {
   monthlySaleId String
   monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
 
-  @@unique([month, year])
+  @@unique([month, year, monthlySaleId])
+
+  @@index([monthlySaleId])
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -169,15 +196,17 @@ model StaffCost {
 // ═══════════════════════════════════════════════════════════════
 
 model MarketingSpend {
-  id           String @id @default(cuid())
-  month        Int
-  year         Int
-  channel      String   // Instagram, In-mall, Flyers, Influencers, etc.
-  amount       Float
-  notes        String?
+  id            String  @id @default(cuid())
+  month         Int
+  year          Int
+  channel       String  // Instagram, In-mall, Flyers, Influencers, etc.
+  amount        Float
+  notes         String?
 
   monthlySaleId String
   monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
+
+  @@index([monthlySaleId])
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -195,7 +224,9 @@ model TransactionSummary {
   monthlySaleId String
   monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
 
-  @@unique([month, year])
+  @@unique([month, year, monthlySaleId])
+
+  @@index([monthlySaleId])
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -204,7 +235,8 @@ model TransactionSummary {
 
 model DataUpload {
   id        String   @id @default(cuid())
-  category  String   // monthly-sales, daily-sales, capex, overheads, pnl, products, staff-costs, marketing, transactions
+  branchId  String?
+  category  String   // monthly-sales, daily-sales, capex, overheads, pnl, products, staff-costs, marketing, transactions, seed
   fileName  String
   rowCount  Int      @default(0)
   status    String   @default("success") // success, error, partial

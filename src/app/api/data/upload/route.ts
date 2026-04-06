@@ -7,14 +7,14 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const category = formData.get('category') as string;
+    const branchId = formData.get('branchId') as string;
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    if (!category) return NextResponse.json({ error: 'No category specified' }, { status: 400 });
+    if (!branchId) return NextResponse.json({ error: 'No branchId specified' }, { status: 400 });
 
-    if (!category) {
-      return NextResponse.json({ error: 'No category specified' }, { status: 400 });
-    }
+    const branch = await db.branch.findUnique({ where: { id: branchId } });
+    if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 });
 
     const text = await file.text();
     const { headers, rows } = parseCSV(text);
@@ -23,14 +23,14 @@ export async function POST(req: NextRequest) {
 
     switch (category) {
       case 'monthly-sales': {
-        await db.monthlySale.deleteMany({});
+        await db.monthlySale.deleteMany({ where: { branchId } });
         for (const row of rows) {
           const month = toNumber(row.month || row.m);
           const year = toNumber(row.year || row.yr || row.y);
           if (!month || !year) continue;
           await db.monthlySale.create({
             data: {
-              month, year,
+              branchId, month, year,
               gross: toNumber(row.gross || row.total_gross),
               returns: toNumber(row.returns || row.return_amount),
               net: toNumber(row.net || row.net_revenue),
@@ -44,32 +44,32 @@ export async function POST(req: NextRequest) {
       }
 
       case 'capex': {
-        await db.capexItem.deleteMany({});
+        await db.capexItem.deleteMany({ where: { branchId } });
         for (const row of rows) {
           const name = row.name || row.item || row.description || '';
           const amount = toNumber(row.amount || row.cost || row.value);
           const category_name = row.category || row.type || row.cat || 'Other';
           if (!name || !amount) continue;
-          await db.capexItem.create({ data: { name, amount, category: category_name } });
+          await db.capexItem.create({ data: { name, amount, category: category_name, branchId } });
           rowCount++;
         }
         break;
       }
 
       case 'overheads': {
-        await db.overhead.deleteMany({});
+        await db.overhead.deleteMany({ where: { branchId } });
         for (const row of rows) {
           const name = row.name || row.item || row.description || '';
           const amount = toNumber(row.amount || row.cost || row.value);
           if (!name || !amount) continue;
-          await db.overhead.create({ data: { name, amount } });
+          await db.overhead.create({ data: { name, amount, branchId } });
           rowCount++;
         }
         break;
       }
 
       case 'products': {
-        await db.productSale.deleteMany({});
+        await db.productSale.deleteMany({ where: { branchId } });
         for (const row of rows) {
           const name = row.name || row.product || row.item || '';
           const unitCost = toNumber(row.unit_cost || row.cost);
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
             data: {
               name, sku: row.sku || null,
               category: row.category || row.type || '',
-              unitCost, sellingPrice, quantitySold, revenue, margin,
+              unitCost, sellingPrice, quantitySold, revenue, margin, branchId,
             },
           });
           rowCount++;
@@ -91,7 +91,6 @@ export async function POST(req: NextRequest) {
       }
 
       case 'transactions': {
-        await db.transactionSummary.deleteMany({});
         for (const row of rows) {
           const month = toNumber(row.month || row.m);
           const year = toNumber(row.year || row.yr || row.y);
@@ -99,9 +98,10 @@ export async function POST(req: NextRequest) {
           const totalRevenue = toNumber(row.revenue || row.total);
           const avgTicketSize = receiptCount > 0 ? totalRevenue / receiptCount : null;
           if (!month || !year || !receiptCount) continue;
-          const ms = await db.monthlySale.findFirst({ where: { month, year } });
+          const ms = await db.monthlySale.findFirst({ where: { month, year, branchId } });
+          if (!ms) continue;
           await db.transactionSummary.create({
-            data: { month, year, receiptCount, totalRevenue, avgTicketSize, monthlySaleId: ms?.id || '' },
+            data: { month, year, receiptCount, totalRevenue, avgTicketSize, monthlySaleId: ms.id },
           });
           rowCount++;
         }
@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
 
     await db.dataUpload.create({
       data: {
+        branchId,
         category,
         fileName: file.name,
         rowCount,
