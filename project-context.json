@@ -1,0 +1,457 @@
+{
+  "project_name": "Parfumix ADCB Branch Intelligence Dashboard",
+  "project_description": "A comprehensive real-time analytics dashboard for Parfumix perfume retail kiosk located in ADCB Mall, Dubai, UAE. Built with Next.js 16 App Router, single-page architecture with sidebar navigation, dark luxury theme, and live database connectivity.",
+  "business_context": {
+    "business_name": "Parfumix ADCB",
+    "location": "ADCB Mall, Dubai, UAE",
+    "type": "Perfume retail kiosk",
+    "currency": "AED",
+    "data_period": "October 2025 – March 2026 (6 months verified)",
+    "pnl_period": "September 2025 – December 2025",
+    "total_investment": 532211,
+    "gross_margin_verified": "73.10%",
+    "key_insight": "Key money (AED 190K) is 35.7% of total investment and is a non-recoverable sunk cost"
+  },
+  "tech_stack": {
+    "framework": "Next.js 16 with App Router",
+    "language": "TypeScript 5",
+    "styling": "Tailwind CSS 4 with shadcn/ui components (New York style)",
+    "charts": "Recharts 2.15",
+    "database": "Prisma ORM with SQLite (client only)",
+    "state_management": "React useState + custom useStoreData hook",
+    "icons": "Lucide React",
+    "fonts": "Geist + Geist Mono (system)",
+    "key_packages": [
+      "recharts", "prisma", "@prisma/client", "lucide-react",
+      "framer-motion", "zustand", "@tanstack/react-query", "next-auth"
+    ]
+  },
+  "architecture": {
+    "pattern": "Single-page app with client-side tab navigation",
+    "data_flow": "SQLite DB → API Routes → useStoreData() hook → Page Components",
+    "file_structure": {
+      "src/app/page.tsx": "Main dashboard file (3177 lines) — all 15 page components, sidebar, navigation, data layer",
+      "src/app/globals.css": "Global styles with dark luxury theme variables",
+      "src/app/layout.tsx": "Next.js layout wrapper",
+      "src/lib/data.ts": "Hardcoded fallback data constants (145 lines)",
+      "src/lib/seed-data.ts": "Seed data for database initialization (89 lines)",
+      "src/lib/csv-parser.ts": "CSV parser utility (113 lines)",
+      "src/lib/db.ts": "Prisma client singleton",
+      "src/lib/utils.ts": "Utility functions (cn, etc.)",
+      "prisma/schema.prisma": "Database schema (11 models)",
+      "db/custom.db": "SQLite database file"
+    },
+    "api_routes": {
+      "GET /api/data/status": "Returns data counts, hasData flags, recent uploads",
+      "POST /api/data/seed": "Seeds database with existing Parfumix data (confirm: true)",
+      "DELETE /api/data/reset": "Clears all data from database",
+      "POST /api/data/upload": "Uploads CSV file (FormData with file + category)",
+      "GET|POST|DELETE /api/data/monthly-sales": "Monthly sales CRUD",
+      "GET|POST /api/data/daily-sales": "Daily sales CRUD",
+      "GET|POST|DELETE /api/data/capex": "CAPEX items CRUD",
+      "GET|POST /api/data/overheads": "Overheads CRUD",
+      "GET|POST|DELETE /api/data/pnl": "P&L periods CRUD (with nested expenses)",
+      "GET|POST|DELETE /api/data/products": "Product/SKU sales CRUD",
+      "GET|POST /api/data/staff-costs": "Staff costs CRUD",
+      "GET|POST /api/data/marketing": "Marketing spend CRUD",
+      "GET|POST /api/data/transactions": "Transaction summaries CRUD"
+    }
+  },
+  "database_schema": {
+    "models": [
+      {
+        "name": "Branch",
+        "fields": ["id", "name", "location", "currency", "createdAt", "updatedAt"]
+      },
+      {
+        "name": "MonthlySale",
+        "fields": ["id", "month (Int)", "year (Int)", "gross (Float)", "returns (Float)", "net (Float)", "cash (Float)", "card (Float)"],
+        "relations": ["dailySales", "staffCosts", "marketingSpends", "transactions"],
+        "unique": ["month, year"]
+      },
+      {
+        "name": "DailySale",
+        "fields": ["id", "date (String YYYY-MM-DD)", "dayOfWeek (Int 0=Sun)", "revenue (Float)", "month (Int)", "year (Int)"],
+        "relations": ["monthlySale"],
+        "unique": ["date"]
+      },
+      {
+        "name": "CapexItem",
+        "fields": ["id", "name", "amount (Float)", "category (String: Lease|Fit-out|Inventory|Tech|Legal|Deposits|People|Other)"]
+      },
+      {
+        "name": "Overhead",
+        "fields": ["id", "name", "amount (Float)"]
+      },
+      {
+        "name": "PnlPeriod",
+        "fields": ["id", "period", "revenue", "cogsGoods", "cogsAccessories", "totalCogs", "grossProfit", "grossMargin", "totalExpenses", "netProfitLoss"],
+        "relations": ["expenses (PnlExpense[])"]
+      },
+      {
+        "name": "PnlExpense",
+        "fields": ["id", "name", "amount", "pnlPeriodId"],
+        "relations": ["pnlPeriod"]
+      },
+      {
+        "name": "ProductSale",
+        "fields": ["id", "name", "sku", "category", "unitCost", "sellingPrice", "quantitySold", "revenue", "margin", "month?", "year?"]
+      },
+      {
+        "name": "StaffCost",
+        "fields": ["id", "month", "year", "salary", "commission", "visa", "accommodation", "overtime", "other", "total"],
+        "relations": ["monthlySale"],
+        "unique": ["month, year"]
+      },
+      {
+        "name": "MarketingSpend",
+        "fields": ["id", "month", "year", "channel", "amount", "notes?"],
+        "relations": ["monthlySale"]
+      },
+      {
+        "name": "TransactionSummary",
+        "fields": ["id", "month", "year", "receiptCount", "totalRevenue", "avgTicketSize?"],
+        "relations": ["monthlySale"],
+        "unique": ["month, year"]
+      },
+      {
+        "name": "DataUpload",
+        "fields": ["id", "category", "fileName", "rowCount", "status (success|error|partial)", "error?"]
+      }
+    ]
+  },
+  "dashboard_pages": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "icon": "LayoutDashboard",
+      "section": "Overview",
+      "description": "Main overview with 8 KPI cards and 4 charts: Revenue vs Investment Recovery, Monthly Net Revenue, Return Rate Trend, Payment Split donut"
+    },
+    {
+      "id": "alerts",
+      "label": "Alerts",
+      "icon": "AlertTriangle",
+      "section": "Overview",
+      "badge": "4",
+      "description": "5 severity-coded alert cards (CRITICAL/WARNING/OPPORTUNITY) covering payback timeline, key money burden, returns spike, revenue surge, loyalty potential"
+    },
+    {
+      "id": "pnl",
+      "label": "P&L Model",
+      "icon": "DollarSign",
+      "section": "Unit Economics",
+      "description": "Interactive margin scenarios (55%/62%/73%/70%), 4 KPI cards, P&L Waterfall chart, Scenario Comparison bar chart, Monthly Cost Structure table with 27 expense lines"
+    },
+    {
+      "id": "capex",
+      "label": "CAPEX Breakdown",
+      "icon": "PieChartIcon",
+      "section": "Unit Economics",
+      "description": "3 KPI cards, sorted CAPEX items with progress bars, category donut chart, overheads list, CAPEX as Revenue Milestones"
+    },
+    {
+      "id": "payback",
+      "label": "Payback Analysis",
+      "icon": "Target",
+      "section": "Unit Economics",
+      "description": "3 payback displays (gross/62%/73% margin), 24-month cumulative recovery area chart, Payback by Margin Scenario bar chart, What Accelerates Payback grid"
+    },
+    {
+      "id": "breakeven",
+      "label": "Breakeven",
+      "icon": "Calculator",
+      "section": "Unit Economics",
+      "description": "Interactive calculator with 3 range sliders (fixed costs, margin%, target profit), 4 live KPI cards, GaugeBar visual meter, sensitivity table, fixed cost donut"
+    },
+    {
+      "id": "revenue",
+      "label": "Revenue Trends",
+      "icon": "TrendingUp",
+      "section": "Sales",
+      "description": "Gross vs Net combo chart, MoM Growth trend, Cumulative Revenue area chart, Monthly Revenue detail table"
+    },
+    {
+      "id": "heatmap",
+      "label": "Daily Heatmap",
+      "icon": "CalendarDays",
+      "section": "Sales",
+      "description": "Month tabs with calendar grid heatmaps (color-coded by revenue), day-of-week averages table"
+    },
+    {
+      "id": "weekly",
+      "label": "Weekly",
+      "icon": "BarChart2",
+      "section": "Sales",
+      "description": "Week-over-week bar charts color-coded by month, day-of-week performance grid, weekly trend line, 5 key stats"
+    },
+    {
+      "id": "returns",
+      "label": "Returns",
+      "icon": "RotateCcw",
+      "section": "Operations",
+      "description": "Returns bar chart with 2.5% target line, Monthly Returns Revenue table, Return Rate trend line chart"
+    },
+    {
+      "id": "payments",
+      "label": "Payment Mix",
+      "icon": "CreditCard",
+      "section": "Operations",
+      "description": "Stacked bar chart (cash vs card), Card % trend line, Payment Mix donut, monthly detail table, Loyalty Card indicator"
+    },
+    {
+      "id": "forecast",
+      "label": "Forecast",
+      "icon": "BarChart3",
+      "section": "Strategy",
+      "description": "9-month forecast view (6 actual + 3 projected), Base/Bear/Bull scenarios for Apr-Jun, Cumulative Projection area chart"
+    },
+    {
+      "id": "simulator",
+      "label": "What-If",
+      "icon": "Zap",
+      "section": "Strategy",
+      "description": "6 scenario cards (rent increase, return reduction, staff addition, revenue growth, marketing cut, foot traffic doubling) with toggle, ComposedChart comparison, net impact scorecard"
+    },
+    {
+      "id": "gaps",
+      "label": "Data Gaps",
+      "icon": "Database",
+      "section": "Strategy",
+      "description": "Data Completeness Score (45%), RadarChart visualization, What We Have cards, Missing Data Priority Matrix (15 gaps), Enhancement Recommendations (6 cards), Data Collection Action Plan timeline"
+    },
+    {
+      "id": "data-center",
+      "label": "Data Center",
+      "icon": "Upload",
+      "section": "System",
+      "badge": "NEW",
+      "description": "Data management hub: Database Status Bar (9 categories), One-Click Seed, 6 CSV Upload Zones, Manual Input Form, Upload History table"
+    }
+  ],
+  "theme": {
+    "background": "#07070a",
+    "card_bg": "#0e0e13",
+    "border": "rgba(255,255,255,0.055)",
+    "text_primary": "#ece8e1",
+    "text_secondary": "#8c8780",
+    "text_tertiary": "#504d49",
+    "gold_accent": "#c9a55a",
+    "gold_dim": "rgba(201,165,90,0.25)",
+    "rose": "#bf5f59",
+    "sage": "#58987a",
+    "amber": "#c4905a",
+    "steel": "#5578bf",
+    "tooltip_bg": "#16161c",
+    "category_colors": {
+      "Lease": "#c9a55a",
+      "Fit-out": "#5578bf",
+      "Inventory": "#58987a",
+      "Tech": "#c4905a",
+      "Legal": "#bf5f59",
+      "Deposits": "#7a6fbf",
+      "People": "#bf5f8c",
+      "Other": "#504d49"
+    }
+  },
+  "verified_data": {
+    "monthly_sales": {
+      "Oct 2025": { "gross": 31691.01, "returns": 600, "net": 31091, "cash": 5766, "card": 25325 },
+      "Nov 2025": { "gross": 40654.33, "returns": 1120, "net": 39534.32, "cash": 8958, "card": 30576.32 },
+      "Dec 2025": { "gross": 43169.76, "returns": 1874.76, "net": 41295, "cash": 7409, "card": 33886 },
+      "Jan 2026": { "gross": 50909, "returns": 1410, "net": 49499, "cash": 8215, "card": 41284 },
+      "Feb 2026": { "gross": 43692, "returns": 1270, "net": 42422, "cash": 7200, "card": 35222 },
+      "Mar 2026": { "gross": 43813.02, "returns": 952, "net": 42861, "cash": 9350, "card": 33511 }
+    },
+    "totals": {
+      "total_gross": 254029.12,
+      "total_net": 246702.32,
+      "total_returns": 7226.76,
+      "total_cash": 46898,
+      "total_card": 199804.32,
+      "avg_monthly_net": 41117.05,
+      "capital_recovered_pct": 46.4,
+      "avg_return_rate_pct": 2.8,
+      "card_share_pct": 81.0
+    },
+    "capex": {
+      "total_setup": 444211,
+      "total_overheads": 88000,
+      "total_investment": 532211,
+      "items": [
+        { "name": "Key Money", "amount": 190000, "category": "Lease" },
+        { "name": "Furniture & Fixtures", "amount": 96489, "category": "Fit-out" },
+        { "name": "Oils, Accessories, Equipment", "amount": 100000, "category": "Inventory" },
+        { "name": "License Registration", "amount": 25400, "category": "Legal" },
+        { "name": "System & Accessories", "amount": 4000, "category": "Tech" },
+        { "name": "Custom Printer", "amount": 6500, "category": "Tech" },
+        { "name": "Software License", "amount": 2500, "category": "Tech" },
+        { "name": "CCTV", "amount": 1500, "category": "Tech" },
+        { "name": "Branch Mobile", "amount": 800, "category": "Tech" },
+        { "name": "3D Drawing", "amount": 4500, "category": "Fit-out" },
+        { "name": "DEWA Deposit", "amount": 2080, "category": "Deposits" },
+        { "name": "Security Deposit", "amount": 6000, "category": "Deposits" },
+        { "name": "Ejari", "amount": 300, "category": "Deposits" },
+        { "name": "Immigration & Establishment", "amount": 1030, "category": "Legal" },
+        { "name": "Staff Visit & Training", "amount": 1500, "category": "People" },
+        { "name": "Preliminary Expenses", "amount": 612, "category": "Other" },
+        { "name": "Cargo & Transportation", "amount": 1000, "category": "Other" }
+      ]
+    },
+    "overheads": [
+      { "name": "Rent & Lease (3 months)", "amount": 33000 },
+      { "name": "Marketing Expenses", "amount": 30000 },
+      { "name": "Salaries (2 staff)", "amount": 9000 },
+      { "name": "Staff Visa x 2", "amount": 16000 }
+    ],
+    "pnl": {
+      "period": "Sep 2025 – Dec 2025",
+      "revenue": 125582.34,
+      "cogs_goods": 28834.82,
+      "cogs_accessories": 4951.40,
+      "total_cogs": 33786.22,
+      "gross_profit": 91796.12,
+      "gross_margin_pct": 73.10,
+      "total_expenses": 104235.62,
+      "net_profit_loss": -12439.50,
+      "top_expenses": [
+        { "name": "Rent or Lease Expense", "amount": 45150.00 },
+        { "name": "Salaries Expense", "amount": 19838.43 },
+        { "name": "Licenses Expense", "amount": 8466.72 },
+        { "name": "Sales Commission", "amount": 4135.00 },
+        { "name": "Staff Visa Expenses", "amount": 3960.00 }
+      ]
+    },
+    "estimated_monthly_costs": {
+      "rent": 11000,
+      "salaries": 3000,
+      "software": 208,
+      "utilities": 800,
+      "marketing": 10000,
+      "misc": 2000,
+      "total": 27008
+    },
+    "forecast": {
+      "Apr 2026": { "base": 44200, "bear": 37570, "bull": 50830 },
+      "May 2026": { "base": 38800, "bear": 32980, "bull": 44620 },
+      "Jun 2026": { "base": 46500, "bear": 39525, "bull": 53475 }
+    }
+  },
+  "data_layer": {
+    "description": "Custom React hook useStoreData() fetches from 5 API endpoints in parallel on mount, transforms API responses into the same shape as hardcoded constants, computes all derived metrics, falls back to hardcoded data if API fails",
+    "interface_StoreData": {
+      "months": "string[]",
+      "monthsFull": "string[]",
+      "gross": "number[]",
+      "returns": "number[]",
+      "net": "number[]",
+      "cash": "number[]",
+      "card": "number[]",
+      "daily": "{ startDay: number; values: number[] }[]",
+      "capexItems": "{ name: string; amount: number; category: string }[]",
+      "overheads": "{ name: string; amount: number }[]",
+      "pnl": "P&L period object with expenses array",
+      "totalGross": "number",
+      "totalNet": "number",
+      "totalReturns": "number",
+      "totalCash": "number",
+      "totalCard": "number",
+      "avgMonthlyNet": "number",
+      "capitalRecovered": "number",
+      "avgReturnRate": "number",
+      "cardShare": "number",
+      "cumulativeNet": "number[]",
+      "returnRates": "number[]",
+      "momGrowth": "(number | null)[]",
+      "cardPct": "number[]",
+      "totalCapex": "number",
+      "totalOverheads": "number",
+      "totalInvestment": "number",
+      "monthlyData": "combined monthly objects for charts",
+      "capexByCategory": "grouped CAPEX by category for donut chart"
+    },
+    "helper_functions": {
+      "deriveMetrics": "Computes totals, averages, cumulative net, return rates, MoM growth, card percentages",
+      "buildMonthlyData": "Builds combined monthly data objects for Recharts",
+      "buildCapexByCategory": "Groups CAPEX items by category"
+    }
+  },
+  "csv_upload_formats": {
+    "monthly-sales": {
+      "required_columns": ["month", "year", "gross", "returns", "net", "cash", "card"],
+      "alt_columns": { "month": ["m"], "year": ["yr", "y"], "gross": ["total_gross"], "returns": ["return_amount"], "net": ["net_revenue"], "cash": ["cash_sales"], "card": ["card_sales", "credit_card"] }
+    },
+    "capex": {
+      "required_columns": ["name", "amount", "category"],
+      "alt_columns": { "name": ["item", "description"], "amount": ["cost", "value"], "category": ["type", "cat"] }
+    },
+    "overheads": {
+      "required_columns": ["name", "amount"],
+      "alt_columns": { "name": ["item", "description"], "amount": ["cost", "value"] }
+    },
+    "products": {
+      "required_columns": ["name"],
+      "optional_columns": ["sku", "category", "unit_cost", "selling_price", "quantity", "revenue", "month", "year"],
+      "alt_columns": { "unit_cost": ["cost", "purchase_price"], "selling_price": ["price", "sale_price"], "quantity": ["qty", "units_sold"], "revenue": ["total", "sales"] }
+    },
+    "transactions": {
+      "required_columns": ["month", "year", "receipts", "revenue"],
+      "alt_columns": { "month": ["m"], "year": ["yr", "y"], "receipts": ["transactions"], "revenue": ["total"] }
+    }
+  },
+  "known_gaps_and_missing_data": {
+    "critical": [
+      "Daily foot traffic count",
+      "Individual transaction receipts (count per day)",
+      "Average ticket size per transaction"
+    ],
+    "high": [
+      "Product/SKU level sales data",
+      "Staff performance metrics",
+      "Marketing spend by channel"
+    ],
+    "medium": [
+      "Customer demographics",
+      "Mall foot traffic patterns",
+      "Competitor pricing data",
+      "Inventory levels and stock-outs"
+    ],
+    "low": [
+      "Weather correlation",
+      "Event/mall promotion calendar",
+      "Customer satisfaction scores"
+    ]
+  },
+  "enhancement_roadmap": {
+    "phase_1_immediate": [
+      "Data upload/input mechanism (DONE)",
+      "Database connectivity (DONE)",
+      "CSV import for bulk data (DONE)"
+    ],
+    "phase_2_short_term": [
+      "Add new monthly data as it comes in",
+      "Upload product/SKU sales from POS",
+      "Track marketing spend by channel",
+      "Add transaction counts for avg ticket size"
+    ],
+    "phase_3_medium_term": [
+      "Automated P&L generation from uploaded data",
+      "Inventory management and reorder alerts",
+      "Customer loyalty programme tracking",
+      "Multi-branch comparison (if expanding)"
+    ]
+  },
+  "current_database_state": {
+    "monthly_sales_records": 6,
+    "daily_sales_records": 182,
+    "capex_items": 17,
+    "overheads": 4,
+    "pnl_periods": 1,
+    "pnl_expenses": 26,
+    "products": 0,
+    "staff_costs": 0,
+    "marketing_spends": 0,
+    "transaction_summaries": 0,
+    "data_completeness": "56% (5 of 9 categories populated)"
+  }
+}
