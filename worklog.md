@@ -99,3 +99,50 @@ Stage Summary:
 - Lint passes cleanly (0 errors, 0 warnings)
 - No compilation errors
 - Verified all 3 Analytics sections (Product Analytics, Staff Productivity, Marketing ROI) are already fully implemented from previous session
+
+---
+## Task ID: 5 - predictive-engine
+### Work Task
+Create a predictive analytics engine module at `/home/z/my-project/src/lib/predictive.ts` providing real statistical forecasting capabilities — pure math, no hardcoded values, no dependencies.
+
+### Work Summary
+Created `/home/z/my-project/src/lib/predictive.ts` with 8 pure utility functions implementing real statistical algorithms:
+
+1. **linearRegression** — Ordinary least-squares regression with slope, intercept, R² goodness-of-fit, and forecast function. Uses closed-form formulas: slope = (nΣxy − ΣxΣy) / (nΣx² − (Σx)²), R² = 1 − SS_res/SS_tot.
+
+2. **exponentialSmoothing** — Simple exponential smoothing (S_t = α·Y_t + (1−α)·S_{t−1}) with configurable alpha (default 0.3). Returns next-period forecast and full smoothed series.
+
+3. **movingAverageForecast** — Simple moving average over configurable window (default 3). Computes forecast, trend direction (up/down/stable via 2% threshold), and overall average.
+
+4. **seasonalIndices** — Multiplicative seasonal decomposition using centered moving average for detrending, period-averaged ratios, and normalization to mean=1. Returns indices array and a forecast function combining linear trend × seasonal factor.
+
+5. **detectAnomalies** — Z-score based anomaly detection with configurable threshold (default 1.5). Returns anomalies array with index, value, z-score, and type (spike/dip).
+
+6. **confidenceInterval** — Prediction interval using regression residuals standard error, widened by √periods and distance from mean x. Includes z-value lookup table with linear interpolation for arbitrary confidence levels.
+
+7. **revenueTrendAnalysis** — Composite analysis combining linear regression slope + exponential smoothing for next-month estimate. Computes CAGR, coefficient of variation (volatility), momentum (last 3 vs first 3 avg change), trend classification (5 levels), and 90% confidence range.
+
+8. **productDemandScore** — Demand scorecard analyzing sales velocity (fast/moderate/slow by absolute thresholds), trend (accelerating/stable/declining via half-split comparison + regression slope), stockout risk (composite of velocity + trend + spike detection), and reorder point (exponential smoothing forecast + 1.5σ safety stock).
+
+All functions handle edge cases (empty arrays, single values, zero values). Outputs rounded to appropriate precision. Zero external dependencies — pure TypeScript. ESLint passes with 0 errors. TypeScript compiles cleanly.
+
+---
+Task ID: 5
+Agent: main
+Task: Fix infinite loop in useHydratedViewMode + upgrade dashboard with real predictive analytics
+
+Work Log:
+- Fixed `getSnapshot` infinite loop: the function was returning new object references each call (JSON.parse creates new objects). React's useSyncExternalStore requires stable references when data hasn't changed.
+- Solution: cached the raw string + parsed object in a ref; returns the same reference when localStorage string hasn't changed.
+- Added custom `parfumix:view-change` event dispatch in `saveViewMode()` so same-tab updates trigger the external store listener.
+- Created `/src/lib/predictive.ts` with 8 statistical functions (delegated to sub-agent)
+- Upgraded Forecast page: replaced hardcoded FORECAST data with real linear regression + exponential smoothing blended forecasts; confidence intervals computed from regression residual SE (not arbitrary ±15%); added trend badge, R² display, CAGR, volatility
+- Upgraded Alerts page: replaced 2 hardcoded alert texts with dynamic anomaly detection (z-score based on NET and RETURNS); added trend-based alert using revenueTrendAnalysis(); added "PREDICTED" badge for dynamically computed alerts; alert count now reflects actual data
+- Upgraded Products page: added productDemandScore per product (velocity, trend direction, stockout risk, reorder point); product list now shows velocity tags (fast/moderate/slow), acceleration indicators, stockout risk warnings, and suggested reorder quantities; KPI card shows demand signals instead of static "Top Product"
+
+Stage Summary:
+- Infinite loop fixed via snapshot caching in useSyncExternalStore
+- 3 pages upgraded with real predictive analytics (Forecast, Alerts, Products)
+- All predictions computed from actual data using statistical algorithms
+- No hardcoded forecast values remain (FORECAST import retained for backward compat but not used for display)
+- Lint: 0 errors, Compilation: ✓ success

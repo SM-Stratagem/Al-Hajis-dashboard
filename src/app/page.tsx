@@ -33,6 +33,12 @@ import {
   cumulativeNet, returnRates, momGrowth, cardPct,
 } from '@/lib/data';
 
+import {
+  linearRegression, exponentialSmoothing, movingAverageForecast,
+  seasonalIndices, detectAnomalies, confidenceInterval,
+  revenueTrendAnalysis, productDemandScore,
+} from '@/lib/predictive';
+
 // ══════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════
@@ -471,7 +477,10 @@ function loadViewMode(): ViewMode {
 
 function saveViewMode(view: ViewMode) {
   if (typeof window === 'undefined') return;
-  try { localStorage.setItem(BRANCH_LS_KEY, JSON.stringify(view)); } catch {}
+  try {
+    localStorage.setItem(BRANCH_LS_KEY, JSON.stringify(view));
+    window.dispatchEvent(new Event('parfumix:view-change'));
+  } catch {}
 }
 
 function getViewLabel(view: ViewMode): string {
@@ -1094,11 +1103,17 @@ function DashboardPage({ data }: { data: StoreData }) {
 // PAGE 2: ALERTS
 // ══════════════════════════════════════════════════════════════════
 function AlertsPage({ data }: { data: StoreData }) {
-  const { totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, pnl: PNL, capexItems: CAPEX_ITEMS, returns: RETURNS, returnRates, net: NET, momGrowth, cardShare } = data;
+  const { totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, pnl: PNL, capexItems: CAPEX_ITEMS, returns: RETURNS, returnRates, net: NET, momGrowth, cardShare, months: MONTHS } = data;
   const paybackMonths73 = Math.ceil(TOTAL_INVESTMENT / (avgMonthlyNet * (PNL.grossMargin / 100)));
   const paybackMonths62 = Math.ceil(TOTAL_INVESTMENT / (avgMonthlyNet * 0.62));
 
-  const alerts = [
+  // ── Real Predictive Alerts ──
+  const revenueAnomalies = detectAnomalies(NET, 1.5);
+  const returnAnomalies = detectAnomalies(RETURNS, 1.5);
+  const trend = revenueTrendAnalysis(NET);
+  const reg = linearRegression(NET);
+
+  const alerts: { severity: 'red' | 'gold' | 'green'; title: string; body: string; icon: any; predictive?: boolean }[] = [
     {
       severity: 'red' as const,
       title: 'Capital Payback Timeline Exceeds 24 Months',
@@ -1111,35 +1126,85 @@ function AlertsPage({ data }: { data: StoreData }) {
       body: `${aed(CAPEX_ITEMS[0].amount)} of the ${aed(TOTAL_INVESTMENT)} total investment is non-recoverable key money. This is the single largest risk factor and has zero residual value.`,
       icon: AlertTriangle,
     },
-    {
-      severity: 'gold' as const,
-      title: 'December Returns Spike to 4.3%',
-      body: `Returns reached ${aed(RETURNS[2])} in December — the highest value and rate (${pct(returnRates[2])}). This coincides with peak sales volume and may indicate gifting-related impulse purchases being returned.`,
-      icon: RotateCcw,
-    },
-    {
-      severity: 'gold' as const,
-      title: 'January Revenue Surge (+19.9% MoM)',
-      body: `January net revenue of ${aed(NET[3])} represents a +${pct(momGrowth[3])} jump from December. This could be driven by post-holiday restocking or seasonal demand. Needs sustained monitoring.`,
-      icon: TrendingUp,
-    },
-    {
-      severity: 'green' as const,
-      title: 'Card Payment Loyalty Potential',
-      body: `${pct(cardShare)} of revenue comes via card payments — strong indicator of repeat customers. A loyalty programme integrated with card transactions could significantly boost retention and basket size.`,
-      icon: CreditCard,
-    },
   ];
+
+  // Add dynamic anomaly alerts
+  const maxReturnAnomaly = returnAnomalies.anomalies.find(a => a.type === 'spike');
+  if (maxReturnAnomaly) {
+    const monthLabel = MONTHS[maxReturnAnomaly.index] || `Month ${maxReturnAnomaly.index + 1}`;
+    alerts.push({
+      severity: 'gold' as const,
+      title: `Returns Spike in ${monthLabel} (${pct(maxReturnAnomaly.zScore)}σ above average)`,
+      body: `Returns of ${aed(maxReturnAnomaly.value)} detected as anomalous (${maxReturnAnomaly.zScore} standard deviations above mean of ${aed(returnAnomalies.mean)}). Peak sales months may attract gifting-related impulse purchases being returned.`,
+      icon: RotateCcw,
+      predictive: true,
+    });
+  }
+
+  // Add revenue spike alerts
+  const revenueSpike = revenueAnomalies.anomalies.find(a => a.type === 'spike');
+  if (revenueSpike) {
+    const monthLabel = MONTHS[revenueSpike.index] || `Month ${revenueSpike.index + 1}`;
+    alerts.push({
+      severity: 'green' as const,
+      title: `Revenue Peak in ${monthLabel} (${revenueSpike.zScore}σ above average)`,
+      body: `Net revenue of ${aed(revenueSpike.value)} is significantly above the ${aed(revenueAnomalies.mean)} average. Investigate drivers — potential for replication at other branches.`,
+      icon: TrendingUp,
+      predictive: true,
+    });
+  }
+
+  // Add revenue dip alerts
+  const revenueDip = revenueAnomalies.anomalies.find(a => a.type === 'dip');
+  if (revenueDip) {
+    const monthLabel = MONTHS[revenueDip.index] || `Month ${revenueDip.index + 1}`;
+    alerts.push({
+      severity: 'gold' as const,
+      title: `Revenue Dip in ${monthLabel} (${revenueDip.zScore}σ below average)`,
+      body: `Net revenue of ${aed(revenueDip.value)} is below normal range. May indicate seasonal slowdown, staffing issues, or mall foot traffic decline.`,
+      icon: TrendingUp,
+      predictive: true,
+    });
+  }
+
+  // Add trend-based alert
+  if (trend.trend === 'strong_growth' || trend.trend === 'growth') {
+    alerts.push({
+      severity: 'green' as const,
+      title: `Revenue Trend: ${trend.trend === 'strong_growth' ? 'Strong' : 'Positive'} Growth (${trend.momentum > 0 ? '+' : ''}${trend.momentum.toFixed(0)}% momentum)`,
+      body: `CAGR: ${trend.cagr > 0 ? '+' : ''}${trend.cagr}%. Next month estimate: ${aed(trend.nextMonthEstimate)} (range: ${aed(trend.nextMonthRange.low)}–${aed(trend.nextMonthRange.high)}). Regression R²=${reg.r2.toFixed(2)}.`,
+      icon: Activity,
+      predictive: true,
+    });
+  } else if (trend.trend === 'decline' || trend.trend === 'strong_decline') {
+    alerts.push({
+      severity: 'red' as const,
+      title: `Revenue Declining (${trend.momentum.toFixed(0)}% momentum)`,
+      body: `CAGR: ${trend.cagr}%. Momentum is negative. Volatility: ${trend.volatility.toFixed(1)}%. Consider cost optimization and marketing boost.`,
+      icon: Activity,
+      predictive: true,
+    });
+  }
+
+  // Add card loyalty alert
+  alerts.push({
+    severity: 'green' as const,
+    title: 'Card Payment Loyalty Potential',
+    body: `${pct(cardShare)} of revenue comes via card payments — strong indicator of repeat customers. A loyalty programme integrated with card transactions could significantly boost retention and basket size.`,
+    icon: CreditCard,
+  });
 
   const sevColors = { red: ROSE, gold: GOLD, green: SAGE };
   const sevBg = { red: 'rgba(191,95,89,0.06)', gold: 'rgba(201,165,90,0.06)', green: 'rgba(88,152,122,0.06)' };
   const sevLabel = { red: 'CRITICAL', gold: 'WARNING', green: 'OPPORTUNITY' };
 
+  const predictiveCount = alerts.filter(a => a.predictive).length;
+
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 14, color: T1, marginBottom: 4 }}>Active Alerts</h2>
-        <p style={{ fontSize: 11, color: T3 }}>4 issues identified across financial, operational, and strategic dimensions</p>
+        <p style={{ fontSize: 11, color: T3 }}>{alerts.length} issues identified &middot; {predictiveCount} dynamically computed from data</p>
       </div>
       <div className="flex flex-col gap-3">
         {alerts.map((a, i) => (
@@ -1156,6 +1221,15 @@ function AlertsPage({ data }: { data: StoreData }) {
               }}>
                 {sevLabel[a.severity]}
               </span>
+              {a.predictive && (
+                <span style={{
+                  padding: '2px 6px', borderRadius: 4, fontSize: 7,
+                  fontWeight: 700, letterSpacing: '0.06em',
+                  background: 'rgba(85,120,191,0.15)', color: STEEL,
+                }}>
+                  PREDICTED
+                </span>
+              )}
               <h3 style={{ fontSize: 12, color: T1, fontWeight: 500 }}>{a.title}</h3>
             </div>
             <p style={{ fontSize: 11, color: T2, lineHeight: 1.7 }}>{a.body}</p>
@@ -1934,12 +2008,26 @@ function PaymentsPage({ data }: { data: StoreData }) {
 // PAGE 10: FORECAST
 // ══════════════════════════════════════════════════════════════════
 function ForecastPage({ data }: { data: StoreData }) {
-  const { months: MONTHS, cumulativeNet, net: NET, totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet } = data;
-  const forecastMonths = [
-    { month: 'Apr 26', ...FORECAST.apr, type: 'forecast' as const },
-    { month: 'May 26', ...FORECAST.may, type: 'forecast' as const },
-    { month: 'Jun 26', ...FORECAST.jun, type: 'forecast' as const },
-  ];
+  const { months: MONTHS, cumulativeNet, net: NET, totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, gross: GROSS } = data;
+
+  // ── Real Predictive Forecasting ──
+  const regression = linearRegression(NET);
+  const smoothed = exponentialSmoothing(NET, 0.3);
+  const maForecast = movingAverageForecast(NET, 3);
+  const trendAnalysis = revenueTrendAnalysis(NET);
+
+  // Generate 3-month forecast using regression + blended smoothing
+  const fcMonths = ['Apr 26', 'May 26', 'Jun 26'];
+  const forecastMonths = fcMonths.map((month, i) => {
+    const x = NET.length + i;
+    const regVal = regression.forecast(x);
+    // Blend regression with exponential smoothing for robustness
+    const blend = NET.length >= 6 ? 0.6 : 0.4;
+    const base = Math.round(blend * regVal + (1 - blend) * smoothed.forecast);
+    // Confidence intervals that widen with each period
+    const ci = confidenceInterval(NET, base, i + 1, 0.9);
+    return { month, base: Math.max(0, base), bear: Math.max(0, Math.round(ci.lower)), bull: Math.round(ci.upper), type: 'forecast' as const };
+  });
 
   const nineMonthData = [
     ...monthlyData.map(d => ({ month: d.month, net: d.net, type: 'actual' })),
@@ -1948,10 +2036,19 @@ function ForecastPage({ data }: { data: StoreData }) {
 
   // Cumulative projection
   const cumForecast = [...cumulativeNet];
-  const lastCum = cumulativeNet[5];
-  [FORECAST.apr.base, FORECAST.may.base, FORECAST.jun.base].forEach(v => {
-    cumForecast.push(cumForecast[cumForecast.length - 1] + v);
+  forecastMonths.forEach(f => {
+    cumForecast.push(cumForecast[cumForecast.length - 1] + f.base);
   });
+
+  // Trend badge
+  const trendLabels: Record<string, { label: string; color: string }> = {
+    strong_growth: { label: 'Strong Growth', color: SAGE },
+    growth: { label: 'Growing', color: '#6dab7e' },
+    stable: { label: 'Stable', color: GOLD },
+    decline: { label: 'Declining', color: AMBER },
+    strong_decline: { label: 'Strong Decline', color: ROSE },
+  };
+  const trendInfo = trendLabels[trendAnalysis.trend] || trendLabels.stable;
 
   return (
     <div>
@@ -1960,18 +2057,24 @@ function ForecastPage({ data }: { data: StoreData }) {
         background: 'rgba(201,165,90,0.06)', border: `1px solid rgba(201,165,90,0.15)`,
         borderRadius: 10, padding: 16, marginBottom: 16,
       }}>
-        <div style={{ fontSize: 10, color: GOLD, fontWeight: 600, marginBottom: 4 }}>Methodology</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 10, color: GOLD, fontWeight: 600 }}>Methodology</div>
+          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 700, letterSpacing: '0.06em', background: `${trendInfo.color}22`, color: trendInfo.color }}>
+            {trendInfo.label}
+          </span>
+        </div>
         <p style={{ fontSize: 11, color: T2, lineHeight: 1.6 }}>
-          Forecasts based on 6-month trailing average ({aed(Math.round(avgMonthlyNet))}/mo) with ±15% confidence band.
-          Bear case accounts for seasonal dip; bull case assumes marketing-driven uplift.
+          Forecasts computed via linear regression (R²={regression.r2.toFixed(2)}) blended with exponential smoothing (α=0.3).
+          Bear/bull bands are 90% confidence intervals that widen per period. CAGR: {trendAnalysis.cagr > 0 ? '+' : ''}{trendAnalysis.cagr}%, Volatility: {trendAnalysis.volatility.toFixed(1)}%.
         </p>
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <KpiCard label="April Forecast" value={aed(FORECAST.apr.base)} sub={`${aed(FORECAST.apr.bear)} – ${aed(FORECAST.apr.bull)}`} badge="Base ±15%" badgeColor={GOLD} />
-        <KpiCard label="May Forecast" value={aed(FORECAST.may.base)} sub={`${aed(FORECAST.may.bear)} – ${aed(FORECAST.may.bull)}`} badge="Base ±15%" badgeColor={GOLD} />
-        <KpiCard label="June Forecast" value={aed(FORECAST.jun.base)} sub={`${aed(FORECAST.jun.bear)} – ${aed(FORECAST.jun.bull)}`} badge="Base ±15%" badgeColor={GOLD} />
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <KpiCard label="April Forecast" value={aed(forecastMonths[0].base)} sub={`${aed(forecastMonths[0].bear)} – ${aed(forecastMonths[0].bull)}`} badge="90% CI" badgeColor={GOLD} />
+        <KpiCard label="May Forecast" value={aed(forecastMonths[1].base)} sub={`${aed(forecastMonths[1].bear)} – ${aed(forecastMonths[1].bull)}`} badge="90% CI" badgeColor={GOLD} />
+        <KpiCard label="June Forecast" value={aed(forecastMonths[2].base)} sub={`${aed(forecastMonths[2].bear)} – ${aed(forecastMonths[2].bull)}`} badge="90% CI" badgeColor={GOLD} />
+        <KpiCard label="Q2 Total" value={aed(forecastMonths.reduce((s, f) => s + f.base, 0))} sub={`Range: ${aed(forecastMonths.reduce((s, f) => s + f.bear, 0))} – ${aed(forecastMonths.reduce((s, f) => s + f.bull, 0))}`} badge={`R² ${regression.r2.toFixed(2)}`} badgeColor={regression.r2 > 0.5 ? SAGE : AMBER} />
       </div>
 
       {/* 9-month revenue view */}
@@ -2022,13 +2125,13 @@ function ForecastPage({ data }: { data: StoreData }) {
             <tr style={{ borderTop: `2px solid ${GOLD}` }}>
               <td style={{ padding: '8px 6px', color: T1, fontWeight: 600 }}>Q2 Total</td>
               <td style={{ padding: '8px 6px', color: ROSE, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                {aed(FORECAST.apr.bear + FORECAST.may.bear + FORECAST.jun.bear)}
+                {aed(forecastMonths.reduce((s, f) => s + f.bear, 0))}
               </td>
               <td style={{ padding: '8px 6px', color: GOLD, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                {aed(FORECAST.apr.base + FORECAST.may.base + FORECAST.jun.base)}
+                {aed(forecastMonths.reduce((s, f) => s + f.base, 0))}
               </td>
               <td style={{ padding: '8px 6px', color: SAGE, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                {aed(FORECAST.apr.bull + FORECAST.may.bull + FORECAST.jun.bull)}
+                {aed(forecastMonths.reduce((s, f) => s + f.bull, 0))}
               </td>
               <td style={{ padding: '8px 6px', color: T3, textAlign: 'right' }}>—</td>
             </tr>
@@ -3715,6 +3818,22 @@ function ProductsPage({ data }: { data: StoreData }) {
 
   const catColorsArr = [GOLD, STEEL, SAGE, AMBER, ROSE, '#7a6fbf', '#bf5f8c'];
 
+  // ── Predictive: Demand scoring per product ──
+  const productsByMonth = products.reduce((acc: Record<string, number[]>, p: any) => {
+    if (!acc[p.name]) acc[p.name] = [];
+    acc[p.name].push(p.quantitySold || 0);
+    return acc;
+  }, {});
+  // Sort by month index
+  const monthKeys = [...new Set(products.map((p: any) => `${p.month}-${p.year}`))].sort();
+  const productDemandMap: Record<string, ReturnType<typeof productDemandScore>> = {};
+  for (const [name, qtyArr] of Object.entries(productsByMonth)) {
+    productDemandMap[name] = productDemandScore(qtyArr);
+  }
+
+  const highRiskProducts = topProducts.filter(p => productDemandMap[p.name]?.stockoutRisk === 'high').length;
+  const accelProducts = topProducts.filter(p => productDemandMap[p.name]?.trend === 'accelerating').length;
+
   // Monthly revenue by category
   const monthlyByCategory = (() => {
     const months = [...new Set(products.map((p: any) => `${p.month}-${p.year}`))].sort();
@@ -3736,7 +3855,7 @@ function ProductsPage({ data }: { data: StoreData }) {
         <KpiCard label="Total Product Revenue" value={m(totalRevenue)} sub={`${topProducts.length} unique products`} badge={`${categoryData.length} categories`} badgeColor={GOLD} />
         <KpiCard label="Total Units Sold" value={totalQty.toLocaleString()} sub={`avg ${m(topProducts.length > 0 ? totalRevenue / topProducts.length : 0)} / product`} />
         <KpiCard label="Avg Gross Margin" value={pct(avgMargin)} sub="Across all SKUs" badge={avgMargin > 65 ? 'Healthy' : 'Low'} badgeColor={avgMargin > 65 ? SAGE : ROSE} />
-        <KpiCard label="Top Product" value={topProducts[0]?.name?.split(' ').slice(0, 2).join(' ') || '—'} sub={topProducts[0] ? m(topProducts[0].revenue) : ''} badge="Best Seller" badgeColor={SAGE} />
+        <KpiCard label="Demand Signals" value={`${accelProducts} accelerating`} sub={`${highRiskProducts} high stockout risk`} badge="Predicted" badgeColor={STEEL} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-3">
@@ -3753,19 +3872,32 @@ function ProductsPage({ data }: { data: StoreData }) {
 
         <ChartCard title="Top 8 Products by Revenue">
           <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-            {topProducts.slice(0, 8).map((p: any, i: number) => (
-              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${BORDER}` }}>
-                <span style={{ width: 20, fontSize: 10, color: T3, textAlign: 'center' }}>{i + 1}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: T1 }}>{p.name}</div>
-                  <div style={{ fontSize: 9, color: T3 }}>{p.category} &middot; {p.quantitySold} units</div>
+            {topProducts.slice(0, 8).map((p: any, i: number) => {
+              const demand = productDemandMap[p.name];
+              const velColor = demand?.velocity === 'fast' ? SAGE : demand?.velocity === 'moderate' ? GOLD : T3;
+              const riskColor = demand?.stockoutRisk === 'high' ? ROSE : demand?.stockoutRisk === 'medium' ? AMBER : 'transparent';
+              return (
+                <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${BORDER}` }}>
+                  <span style={{ width: 20, fontSize: 10, color: T3, textAlign: 'center' }}>{i + 1}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: T1 }}>{p.name}</div>
+                    <div style={{ fontSize: 9, color: T3 }}>
+                      {p.category} &middot; {p.quantitySold} units
+                      {demand && <span style={{ marginLeft: 6, color: velColor }}>{demand.velocity}</span>}
+                      {demand?.trend === 'accelerating' && <span style={{ marginLeft: 4, color: SAGE }}>↑ accel</span>}
+                      {demand?.trend === 'declining' && <span style={{ marginLeft: 4, color: ROSE }}>↓ slow</span>}
+                      {demand?.reorderPoint > 0 && <span style={{ marginLeft: 6, color: T3 }}>reorder: {demand.reorderPoint}u</span>}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: T1, fontFamily: 'Georgia, serif' }}>{m(p.revenue)}</div>
+                    <div style={{ fontSize: 9, color: riskColor === 'transparent' ? T3 : riskColor }}>
+                      {demand?.stockoutRisk === 'high' ? '⚠ high risk' : demand?.stockoutRisk === 'medium' ? '● moderate' : pct(p.margin)} margin
+                    </div>
+                  </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 11, color: T1, fontFamily: 'Georgia, serif' }}>{m(p.revenue)}</div>
-                  <div style={{ fontSize: 9, color: T3 }}>{pct(p.margin)} margin</div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </ChartCard>
       </div>
@@ -4114,30 +4246,55 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
 // ══════════════════════════════════════════════════════════════════
 // HYDRATION-SAFE VIEW MODE HOOK
 // ══════════════════════════════════════════════════════════════════
+const SERVER_SNAPSHOT: ViewMode = { type: 'branch', slug: DEFAULT_BRANCH_SLUG };
+
 function useHydratedViewMode(): ViewMode {
-  // Server always returns the default branch for consistent SSR output
-  const serverSnapshot: ViewMode = { type: 'branch', slug: DEFAULT_BRANCH_SLUG };
+  // Cache snapshot so useSyncExternalStore gets stable references
+  const cachedRef = useRef<{ raw: string; parsed: ViewMode }>({
+    raw: '',
+    parsed: SERVER_SNAPSHOT,
+  });
 
   const subscribe = useCallback((callback: () => void) => {
-    window.addEventListener('storage', callback);
-    return () => window.removeEventListener('storage', callback);
+    // Listen for storage events (cross-tab) and custom event (same-tab updates)
+    const handler = (e: StorageEvent | Event) => {
+      if (e instanceof StorageEvent && e.key !== BRANCH_LS_KEY) return;
+      callback();
+    };
+    window.addEventListener('storage', handler);
+    window.addEventListener('parfumix:view-change', handler);
+    return () => {
+      window.removeEventListener('storage', handler);
+      window.removeEventListener('parfumix:view-change', handler);
+    };
   }, []);
 
   const getSnapshot = useCallback((): ViewMode => {
     try {
       const stored = localStorage.getItem(BRANCH_LS_KEY);
+      if (stored === cachedRef.current.raw) return cachedRef.current.parsed;
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed.type === 'branch' && parsed.slug) return parsed;
-        if (parsed.type === 'all') return { type: 'all' };
-        if (parsed.type === 'country') return parsed;
-        if (parsed.type === 'city') return parsed;
+        if (parsed.type === 'branch' && parsed.slug) {
+          cachedRef.current = { raw: stored, parsed };
+          return parsed;
+        }
+        if (parsed.type === 'all') {
+          const v: ViewMode = { type: 'all' };
+          cachedRef.current = { raw: stored, parsed: v };
+          return v;
+        }
+        if (parsed.type === 'country' || parsed.type === 'city') {
+          cachedRef.current = { raw: stored, parsed };
+          return parsed;
+        }
       }
     } catch {}
-    return serverSnapshot;
+    cachedRef.current = { raw: '', parsed: SERVER_SNAPSHOT };
+    return SERVER_SNAPSHOT;
   }, []);
 
-  const getServerSnapshot = useCallback((): ViewMode => serverSnapshot, []);
+  const getServerSnapshot = useCallback((): ViewMode => SERVER_SNAPSHOT, []);
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
