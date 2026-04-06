@@ -573,7 +573,7 @@ const navSections = [
     title: 'Overview',
     items: [
       { id: 'dashboard' as PageId, label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'alerts' as PageId, label: 'Alerts', icon: AlertTriangle, badge: '4' },
+      { id: 'alerts' as PageId, label: 'Alerts', icon: AlertTriangle, badge: '__ALERT_COUNT__' },
     ],
   },
   {
@@ -852,9 +852,33 @@ function NoDataPage({ view }: { view: ViewMode }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// ALERT COUNT COMPUTATION (mirrors AlertsPage logic for sidebar badge)
+// ══════════════════════════════════════════════════════════════════
+function computeAlertCount(data: StoreData): number {
+  const { totalInvestment: TOTAL_INVESTMENT, avgMonthlyNet, pnl: PNL, capexItems: CAPEX_ITEMS, returns: RETURNS, net: NET } = data;
+  let count = 0;
+  const paybackMonths73 = Math.ceil(TOTAL_INVESTMENT / (avgMonthlyNet * (PNL.grossMargin / 100)));
+  if (paybackMonths73 > 24) count++;
+  if (CAPEX_ITEMS.length > 0 && TOTAL_INVESTMENT > 0) {
+    const keyMoneyPct = (CAPEX_ITEMS[0].amount / TOTAL_INVESTMENT) * 100;
+    if (keyMoneyPct > 20) count++;
+  }
+  const returnAnomalies = detectAnomalies(RETURNS, 1.5);
+  const revenueAnomalies = detectAnomalies(NET, 1.5);
+  const trend = revenueTrendAnalysis(NET);
+  if (returnAnomalies.anomalies.find(a => a.type === 'spike')) count++;
+  if (revenueAnomalies.anomalies.find(a => a.type === 'spike')) count++;
+  if (revenueAnomalies.anomalies.find(a => a.type === 'dip')) count++;
+  if (trend.trend === 'growth' || trend.trend === 'strong_growth') count++;
+  else if (trend.trend === 'decline' || trend.trend === 'strong_decline') count++;
+  count++; // card loyalty alert
+  return count;
+}
+
+// ══════════════════════════════════════════════════════════════════
 // SIDEBAR
 // ══════════════════════════════════════════════════════════════════
-function Sidebar({ active, onChange, branchLabel }: { active: PageId; onChange: (p: PageId) => void; branchLabel: string }) {
+function Sidebar({ active, onChange, branchLabel, alertCount }: { active: PageId; onChange: (p: PageId) => void; branchLabel: string; alertCount?: number }) {
   return (
     <aside style={{
       width: 220, minHeight: '100vh', position: 'sticky', top: 0,
@@ -907,10 +931,12 @@ function Sidebar({ active, onChange, branchLabel }: { active: PageId; onChange: 
                   <span style={{ flex: 1 }}>{item.label}</span>
                   {item.badge && (
                     <span style={{
-                      background: ROSE, color: '#fff', fontSize: 8, fontWeight: 700,
+                      background: item.badge === '__ALERT_COUNT__' && alertCount === 0 ? 'rgba(88,152,122,0.3)' : ROSE,
+                      color: item.badge === '__ALERT_COUNT__' && alertCount === 0 ? SAGE : '#fff',
+                      fontSize: 8, fontWeight: 700,
                       padding: '1px 6px', borderRadius: 999, lineHeight: '16px',
                     }}>
-                      {item.badge}
+                      {item.badge === '__ALERT_COUNT__' ? alertCount : item.badge}
                     </span>
                   )}
                 </button>
@@ -1116,20 +1142,30 @@ function AlertsPage({ data }: { data: StoreData }) {
   const trend = revenueTrendAnalysis(NET);
   const reg = linearRegression(NET);
 
-  const alerts: { severity: 'red' | 'gold' | 'green'; title: string; body: string; icon: any; predictive?: boolean }[] = [
-    {
+  const alerts: { severity: 'red' | 'gold' | 'green'; title: string; body: string; icon: any; predictive?: boolean }[] = [];
+
+  // Payback check (only if > 24 months)
+  if (paybackMonths73 > 24) {
+    alerts.push({
       severity: 'red' as const,
       title: 'Capital Payback Timeline Exceeds 24 Months',
-      body: `At 73% gross margin, payback requires ~${paybackMonths73} months (${(paybackMonths73 / 12).toFixed(1)} years). At 62% margin, it extends to ~${paybackMonths62} months. The AED 190K key money significantly inflates the capital base.`,
+      body: `At ${PNL.grossMargin}% gross margin, payback requires ~${paybackMonths73} months (${(paybackMonths73 / 12).toFixed(1)} years). At 62% margin, it extends to ~${paybackMonths62} months. The key money of ${aed(CAPEX_ITEMS.length > 0 ? CAPEX_ITEMS[0].amount : 0)} significantly inflates the capital base.`,
       icon: Clock,
-    },
-    {
-      severity: 'red' as const,
-      title: 'Key Money is 35.7% Sunk Cost',
-      body: `${aed(CAPEX_ITEMS[0].amount)} of the ${aed(TOTAL_INVESTMENT)} total investment is non-recoverable key money. This is the single largest risk factor and has zero residual value.`,
-      icon: AlertTriangle,
-    },
-  ];
+    });
+  }
+
+  // Key money check
+  if (CAPEX_ITEMS.length > 0 && TOTAL_INVESTMENT > 0) {
+    const keyMoneyPct = ((CAPEX_ITEMS[0].amount / TOTAL_INVESTMENT) * 100).toFixed(1);
+    if (parseFloat(keyMoneyPct) > 20) {
+      alerts.push({
+        severity: parseFloat(keyMoneyPct) > 35 ? 'red' as const : 'gold' as const,
+        title: `Key Money is ${keyMoneyPct}% Sunk Cost`,
+        body: `${aed(CAPEX_ITEMS[0].amount)} of the ${aed(TOTAL_INVESTMENT)} total investment is non-recoverable key money. This is the single largest risk factor and has zero residual value.`,
+        icon: AlertTriangle,
+      });
+    }
+  }
 
   // Add dynamic anomaly alerts
   const maxReturnAnomaly = returnAnomalies.anomalies.find(a => a.type === 'spike');
@@ -2385,151 +2421,289 @@ function BreakevenPage({ data }: { data: StoreData }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// SHARED: RANGE SLIDER COMPONENT (for What-If Simulator)
+// ══════════════════════════════════════════════════════════════════
+function RangeSlider({ label, value, onChange, min, max, step, unit, icon: Icon }: {
+  label: string; value: number; onChange: (v: number) => void;
+  min: number; max: number; step: number; unit?: string; icon: any;
+}) {
+  const fillColor = value > 0 ? SAGE : value < 0 ? ROSE : GOLD;
+  return (
+    <div style={{ padding: '14px 16px', background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon size={13} style={{ color: value !== 0 ? fillColor : T3, opacity: 0.7 }} />
+          <span style={{ fontSize: 10, color: T1, fontWeight: 500 }}>{label}</span>
+        </div>
+        <span style={{
+          fontSize: 11, fontFamily: 'DM Mono, monospace', fontWeight: 600, color: fillColor,
+        }}>
+          {value >= 0 ? '+' : ''}{value}{unit || ''}
+        </span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        style={{
+          width: '100%', height: 4, borderRadius: 2, outline: 'none',
+          WebkitAppearance: 'none', appearance: 'none',
+          background: `linear-gradient(to right, ${fillColor} 0%, ${fillColor} ${((value - min) / (max - min)) * 100}%, rgba(255,255,255,0.08) ${((value - min) / (max - min)) * 100}%, rgba(255,255,255,0.08) 100%)`,
+          cursor: 'pointer',
+        }}
+      />
+      <style>{`
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none; appearance: none;
+          width: 14px; height: 14px; border-radius: 50%;
+          background: ${T1}; border: 2px solid ${fillColor};
+          cursor: pointer; box-shadow: 0 0 6px rgba(0,0,0,0.3);
+        }
+        input[type="range"]::-moz-range-thumb {
+          width: 14px; height: 14px; border-radius: 50%;
+          background: ${T1}; border: 2px solid ${fillColor};
+          cursor: pointer;
+        }
+      `}</style>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+        <span style={{ fontSize: 8, color: T3 }}>{min}{unit || ''}</span>
+        <span style={{ fontSize: 8, color: T3 }}>{max}{unit || ''}</span>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // PAGE 13: WHAT-IF SIMULATOR
 // ══════════════════════════════════════════════════════════════════
 function SimulatorPage({ data }: { data: StoreData }) {
-  const { avgMonthlyNet, pnl: PNL, totalReturns, net: NET, months: MONTHS } = data;
-  const [activeScenarios, setActiveScenarios] = useState<Set<number>>(new Set());
+  const { avgMonthlyNet, pnl: PNL, totalReturns, net: NET, months: MONTHS, totalInvestment: TOTAL_INVESTMENT, currency: cur } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
 
+  const cur_ = cur || 'AED';
   const currentNetProfit = Math.round(avgMonthlyNet * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total);
   const currentCosts = EST_MONTHLY_COSTS.total;
+  const currentGP = Math.round(avgMonthlyNet * (PNL.grossMargin / 100));
+  const baseRent = EST_MONTHLY_COSTS.rent;
+  const baseSalaries = EST_MONTHLY_COSTS.salaries;
+  const baseMarketing = EST_MONTHLY_COSTS.marketing;
 
-  const scenarios = [
-    {
-      title: 'Rent Increase to AED 15,000/mo',
-      tag: 'RISK', tagColor: ROSE,
-      icon: Store,
-      before: { costs: currentCosts, netProfit: currentNetProfit },
-      after: {
-        costs: currentCosts + 4000,
-        netProfit: currentNetProfit - 4000,
-      },
-      impact: `Costs rise ${aed(4000)}/mo. New monthly net: ${aed(currentNetProfit - 4000)}`,
-    },
-    {
-      title: 'Reduce Returns by 50%',
-      tag: 'OPPORTUNITY', tagColor: SAGE,
-      icon: RotateCcw,
-      before: { annualReturns: totalReturns },
-      after: { annualReturns: Math.round(totalReturns * 0.5) },
-      impact: `Recover ~${aed(Math.round(totalReturns * 0.5))}/yr in saved returns`,
-    },
-    {
-      title: 'Add 3rd Staff Member',
-      tag: 'COST', tagColor: AMBER,
-      icon: Users,
-      before: { costs: currentCosts, netProfit: currentNetProfit },
-      after: { costs: currentCosts + 3000, netProfit: currentNetProfit - 3000 },
-      impact: `+${aed(3000)}/mo salary. Revenue needed: ${aed(currentCosts + 3000 + currentNetProfit)} to maintain profit`,
-    },
-    {
-      title: 'Increase Avg Revenue by 15%',
-      tag: 'GROWTH', tagColor: SAGE,
-      icon: ArrowUpRight,
-      before: { avgNet: Math.round(avgMonthlyNet), netProfit: currentNetProfit },
-      after: {
-        avgNet: Math.round(avgMonthlyNet * 1.15),
-        netProfit: Math.round(avgMonthlyNet * 1.15 * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total),
-      },
-      impact: `New monthly net profit: ${aed(Math.round(avgMonthlyNet * 1.15 * (PNL.grossMargin / 100) - EST_MONTHLY_COSTS.total))}`,
-    },
-    {
-      title: 'Cut Marketing to AED 5,000/mo',
-      tag: 'SAVINGS', tagColor: GOLD,
-      icon: Target,
-      before: { costs: currentCosts, netProfit: currentNetProfit },
-      after: { costs: currentCosts - 5000, netProfit: currentNetProfit + 5000 },
-      impact: `Save ${aed(5000)}/mo but risk losing visibility. Net: ${aed(currentNetProfit + 5000)}/mo`,
-    },
-    {
-      title: 'Double the Foot Traffic',
-      tag: 'OPTIMISTIC', tagColor: STEEL,
-      icon: TrendingUp,
-      before: { avgNet: Math.round(avgMonthlyNet) },
-      after: { avgNet: Math.round(avgMonthlyNet * 2) },
-      impact: `Projected monthly revenue: ${aed(Math.round(avgMonthlyNet * 2))}. Annual: ${aed(Math.round(avgMonthlyNet * 2 * 12))}`,
-    },
-  ];
+  // ── Interactive Slider States ──
+  const [rentChange, setRentChange] = useState(0);        // +/- AED per month
+  const [staffChange, setStaffChange] = useState(0);      // +/- AED per month (0, 3000, -3000)
+  const [revenueGrowth, setRevenueGrowth] = useState(0);  // % change (-30 to +100)
+  const [marketingChange, setMarketingChange] = useState(0); // +/- AED
+  const [returnsReduction, setReturnsReduction] = useState(0); // 0-100%
+  const [marginShift, setMarginShift] = useState(0);      // +/- percentage points
 
-  const toggleScenario = (idx: number) => {
-    setActiveScenarios(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx); else next.add(idx);
-      return next;
-    });
-  };
+  // ── Derived Calculations ──
+  const adjustedMargin = PNL.grossMargin + marginShift;
+  const adjustedRevenue = avgMonthlyNet * (1 + revenueGrowth / 100);
+  const adjustedGP = Math.round(adjustedRevenue * (adjustedMargin / 100));
+  const adjustedCosts = currentCosts + rentChange + staffChange + marketingChange;
+  const adjustedNetProfit = adjustedGP - adjustedCosts;
+  const returnsSaving = (totalReturns / 12) * (returnsReduction / 100); // monthly saving
+  const totalAdjustedNet = adjustedNetProfit + Math.round(returnsSaving);
 
-  // Comparison chart: current vs best case
-  const bestCaseGP = Math.round(avgMonthlyNet * 1.15 * (PNL.grossMargin / 100));
-  const bestCaseCosts = currentCosts - 5000;
-  const bestCaseNet = bestCaseGP - bestCaseCosts;
+  const breakevenRevenue = adjustedMargin > 0 ? Math.round(adjustedCosts / (adjustedMargin / 100)) : Infinity;
+  const newPayback = totalAdjustedNet > 0 ? Math.ceil(TOTAL_INVESTMENT / totalAdjustedNet) : 999;
+  const annualizedProfit = totalAdjustedNet * 12;
+  const profitDelta = totalAdjustedNet - currentNetProfit;
+  const profitDeltaPct = currentNetProfit !== 0 ? ((profitDelta / Math.abs(currentNetProfit)) * 100).toFixed(0) : '—';
+
+  const isChanged = rentChange !== 0 || staffChange !== 0 || revenueGrowth !== 0 || marketingChange !== 0 || returnsReduction !== 0 || marginShift !== 0;
+
+  // ── Chart data ──
   const comparisonData = MONTHS.map((m, i) => ({
     month: m,
     current: NET[i],
-    bestCase: Math.round(NET[i] * 1.15),
+    simulated: Math.round(NET[i] * (1 + revenueGrowth / 100)),
   }));
+
+  // ── Preset Scenarios ──
+  const presets = [
+    {
+      label: 'Optimistic Growth',
+      tag: 'GROWTH', color: SAGE,
+      icon: ArrowUpRight,
+      values: { rentChange: 0, staffChange: 0, revenueGrowth: 20, marketingChange: 0, returnsReduction: 30, marginShift: 2 },
+      desc: '+20% revenue, −30% returns, +2pp margin',
+    },
+    {
+      label: 'Cost Crisis',
+      tag: 'RISK', color: ROSE,
+      icon: AlertTriangle,
+      values: { rentChange: 5000, staffChange: 3000, revenueGrowth: -10, marketingChange: 0, returnsReduction: 0, marginShift: -5 },
+      desc: '+5K rent, +3K staff, −10% revenue, −5pp margin',
+    },
+    {
+      label: 'Lean Operations',
+      tag: 'EFFICIENCY', color: GOLD,
+      icon: Target,
+      values: { rentChange: 0, staffChange: 0, revenueGrowth: 0, marketingChange: -3000, returnsReduction: 40, marginShift: 0 },
+      desc: '−3K marketing, −40% returns',
+    },
+    {
+      label: 'Expansion Mode',
+      tag: 'SCALE', color: STEEL,
+      icon: TrendingUp,
+      values: { rentChange: 0, staffChange: 5000, revenueGrowth: 35, marketingChange: 3000, returnsReduction: 20, marginShift: 0 },
+      desc: '+5K staff, +35% revenue, +3K marketing',
+    },
+    {
+      label: 'Reset',
+      tag: 'DEFAULT', color: T3,
+      icon: RotateCcw,
+      values: { rentChange: 0, staffChange: 0, revenueGrowth: 0, marketingChange: 0, returnsReduction: 0, marginShift: 0 },
+      desc: 'Reset all sliders to baseline',
+    },
+  ];
+
+  const applyPreset = (p: typeof presets[0]) => {
+    setRentChange(p.values.rentChange);
+    setStaffChange(p.values.staffChange);
+    setRevenueGrowth(p.values.revenueGrowth);
+    setMarketingChange(p.values.marketingChange);
+    setReturnsReduction(p.values.returnsReduction);
+    setMarginShift(p.values.marginShift);
+  };
 
   return (
     <div>
-      {/* 6 scenario cards */}
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        {scenarios.map((s, i) => (
-          <div key={i} style={{
-            background: CARD_BG, border: `1px solid ${activeScenarios.has(i) ? `${s.tagColor}44` : BORDER}`,
-            borderRadius: 10, padding: 16, cursor: 'pointer', transition: 'border-color 0.2s',
-          }} onClick={() => toggleScenario(i)}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <s.icon size={14} style={{ color: s.tagColor, opacity: 0.8 }} />
-              <span style={{
-                padding: '2px 6px', borderRadius: 4, fontSize: 7, fontWeight: 700, letterSpacing: '0.06em',
-                background: `${s.tagColor}22`, color: s.tagColor,
-              }}>{s.tag}</span>
-            </div>
-            <div style={{ fontSize: 11, color: T1, fontWeight: 500, marginBottom: 8, lineHeight: 1.4 }}>{s.title}</div>
-            <div style={{ fontSize: 9, color: T2, lineHeight: 1.6, marginBottom: 10 }}>{s.impact}</div>
-            <div style={{
-              padding: '4px 8px', borderRadius: 6, fontSize: 9, fontWeight: 600, textAlign: 'center',
-              background: activeScenarios.has(i) ? `${s.tagColor}22` : 'rgba(255,255,255,0.03)',
-              color: activeScenarios.has(i) ? s.tagColor : T3, border: `1px solid ${activeScenarios.has(i) ? `${s.tagColor}44` : BORDER}`,
+      {/* ── Preset scenario buttons ── */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: T3, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Quick Scenarios</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {presets.map((p, i) => (
+            <button key={i} onClick={() => applyPreset(p)} style={{
+              padding: '6px 12px', borderRadius: 6, fontSize: 9, fontWeight: 600,
+              border: `1px solid ${p.color}33`,
+              background: `${p.color}11`,
+              color: p.color, cursor: 'pointer', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', gap: 6,
+              transition: 'all 0.15s',
             }}>
-              {activeScenarios.has(i) ? 'Applied' : 'Apply Scenario'}
-            </div>
-          </div>
-        ))}
+              <p.icon size={11} />
+              <span>{p.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Comparison chart */}
-      <ChartCard title="Current vs Best-Case Scenario (6 Months)" className="mb-3">
+      {/* ── Slider Controls ── */}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <RangeSlider label="Rent Change" value={rentChange} onChange={setRentChange} min={-5000} max={15000} step={500} unit={` ${cur_}/mo`} icon={Store} />
+        <RangeSlider label="Staff Cost Change" value={staffChange} onChange={setStaffChange} min={-3000} max={10000} step={500} unit={` ${cur_}/mo`} icon={Users} />
+        <RangeSlider label="Revenue Growth" value={revenueGrowth} onChange={setRevenueGrowth} min={-30} max={100} step={1} unit="%" icon={ArrowUpRight} />
+        <RangeSlider label="Marketing Budget" value={marketingChange} onChange={setMarketingChange} min={-10000} max={10000} step={500} unit={` ${cur_}/mo`} icon={Target} />
+        <RangeSlider label="Returns Reduction" value={returnsReduction} onChange={setReturnsReduction} min={0} max={100} step={5} unit="%" icon={RotateCcw} />
+        <RangeSlider label="Margin Shift" value={marginShift} onChange={setMarginShift} min={-15} max={15} step={1} unit=" pp" icon={Activity} />
+      </div>
+
+      {/* ── Live P&L Impact ── */}
+      <ChartCard title="Live P&L Impact" wide>
+        <div className="grid grid-cols-4 gap-3">
+          <div style={{ padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 }}>Gross Profit</div>
+            <div style={{ fontSize: 22, fontFamily: 'Georgia, serif', color: isChanged ? SAGE : T1, lineHeight: 1 }}>{m(adjustedGP)}</div>
+            <div style={{ fontSize: 9, color: T2, marginTop: 4 }}>
+              <span style={{ textDecoration: 'line-through', opacity: 0.5 }}>{m(currentGP)}</span>
+              {' → '}
+              <span style={{ color: adjustedMargin !== PNL.grossMargin ? GOLD : 'inherit' }}>{adjustedMargin}%</span>
+            </div>
+          </div>
+          <div style={{ padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 }}>Monthly Costs</div>
+            <div style={{ fontSize: 22, fontFamily: 'Georgia, serif', color: adjustedCosts > currentCosts ? ROSE : adjustedCosts < currentCosts ? SAGE : T1, lineHeight: 1 }}>{m(adjustedCosts)}</div>
+            <div style={{ fontSize: 9, color: T2, marginTop: 4 }}>
+              <span style={{ textDecoration: 'line-through', opacity: 0.5 }}>{m(currentCosts)}</span>
+              {' → '}Δ {adjustedCosts - currentCosts >= 0 ? '+' : ''}{m(adjustedCosts - currentCosts)}
+            </div>
+          </div>
+          <div style={{ padding: 16, background: totalAdjustedNet > currentNetProfit ? 'rgba(88,152,122,0.04)' : totalAdjustedNet < currentNetProfit ? 'rgba(191,95,89,0.04)' : 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center', border: `1px solid ${totalAdjustedNet > currentNetProfit ? 'rgba(88,152,122,0.15)' : totalAdjustedNet < currentNetProfit ? 'rgba(191,95,89,0.15)' : BORDER}` }}>
+            <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', color: totalAdjustedNet > currentNetProfit ? SAGE : totalAdjustedNet < currentNetProfit ? ROSE : T3, marginBottom: 6 }}>Monthly Net Profit</div>
+            <div style={{ fontSize: 22, fontFamily: 'Georgia, serif', color: totalAdjustedNet >= 0 ? T1 : ROSE, lineHeight: 1 }}>{m(totalAdjustedNet)}</div>
+            <div style={{ fontSize: 9, color: profitDelta >= 0 ? SAGE : ROSE, marginTop: 4 }}>
+              {profitDelta >= 0 ? '▲' : '▼'} {m(Math.abs(profitDelta))}/mo ({profitDeltaPct}%)
+            </div>
+          </div>
+          <div style={{ padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 }}>Payback Period</div>
+            <div style={{ fontSize: 22, fontFamily: 'Georgia, serif', color: newPayback <= 24 ? SAGE : newPayback <= 60 ? AMBER : ROSE, lineHeight: 1 }}>
+              {newPayback > 100 ? '100+' : newPayback} mo
+            </div>
+            <div style={{ fontSize: 9, color: T2, marginTop: 4 }}>
+              ({(newPayback / 12).toFixed(1)} yrs) · Annual: {m(annualizedProfit)}
+            </div>
+          </div>
+        </div>
+      </ChartCard>
+
+      {/* ── Comparison Chart ── */}
+      <ChartCard title={`Revenue: Current vs Simulated ${isChanged ? `(+${revenueGrowth}% growth)` : ''}`} className="mb-3">
         <ResponsiveContainer width="100%" height={280}>
           <ComposedChart data={comparisonData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
             <XAxis dataKey="month" tick={axisTick} />
-            <YAxis tick={axisTick} tickFormatter={v => aedK(v)} />
+            <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
             <Tooltip content={<AEDTooltip />} />
             <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: T2 }} />
             <Bar dataKey="current" name="Current" fill={GOLD} radius={[3, 3, 0, 0]} barSize={20} />
-            <Line dataKey="bestCase" name="Best Case (+15%)" stroke={SAGE} strokeWidth={2} dot={{ r: 3, fill: SAGE }} />
+            <Line dataKey="simulated" name="Simulated" stroke={SAGE} strokeWidth={2} dot={{ r: 3, fill: SAGE }} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* Net impact scorecard */}
-      <ChartCard title="Net Impact Scorecard" wide>
-        <div className="grid grid-cols-3 gap-3">
-          <div style={{ padding: 20, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
-            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 8 }}>Current Monthly Net Profit</div>
-            <div style={{ fontSize: 28, fontFamily: 'Georgia, serif', color: T1, lineHeight: 1 }}>{aed(currentNetProfit)}</div>
-            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>At {PNL.grossMargin}% margin, {aed(currentCosts)} costs</div>
+      {/* ── Cost Breakdown ── */}
+      <ChartCard title="Adjusted Cost Structure" wide>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {[
+                { label: 'Rent', base: baseRent, delta: rentChange, color: GOLD },
+                { label: 'Salaries', base: baseSalaries, delta: staffChange, color: SAGE },
+                { label: 'Marketing', base: baseMarketing, delta: marketingChange, color: AMBER },
+                { label: 'Utilities', base: EST_MONTHLY_COSTS.utilities, delta: 0, color: STEEL },
+                { label: 'Software', base: EST_MONTHLY_COSTS.software, delta: 0, color: T3 },
+                { label: 'Misc', base: EST_MONTHLY_COSTS.misc, delta: 0, color: T3 },
+              ].map(cost => {
+                const total = cost.base + cost.delta;
+                const pctOfTotal = adjustedCosts > 0 ? (total / adjustedCosts * 100) : 0;
+                return (
+                  <div key={cost.label}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <span style={{ fontSize: 10, color: T2 }}>{cost.label}</span>
+                      <span style={{ fontSize: 10, color: cost.delta !== 0 ? (cost.delta > 0 ? ROSE : SAGE) : T1, fontFamily: 'DM Mono, monospace' }}>
+                        {m(total)} {cost.delta !== 0 && <span style={{ fontSize: 8, opacity: 0.7 }}>({cost.delta > 0 ? '+' : ''}{m(cost.delta)})</span>}
+                      </span>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)' }}>
+                      <div style={{ height: '100%', borderRadius: 2, background: cost.color, width: `${pctOfTotal}%`, transition: 'width 0.3s' }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div style={{ padding: 20, background: 'rgba(88,152,122,0.04)', borderRadius: 8, textAlign: 'center', border: `1px solid rgba(88,152,122,0.15)` }}>
-            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: SAGE, marginBottom: 8 }}>Best Case (All Improvements)</div>
-            <div style={{ fontSize: 28, fontFamily: 'Georgia, serif', color: SAGE, lineHeight: 1 }}>{aed(bestCaseNet)}</div>
-            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>+15% revenue, {aed(5000)} marketing cut</div>
-          </div>
-          <div style={{ padding: 20, background: 'rgba(191,95,89,0.04)', borderRadius: 8, textAlign: 'center', border: `1px solid rgba(191,95,89,0.15)` }}>
-            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: ROSE, marginBottom: 8 }}>Worst Case (All Deteriorations)</div>
-            <div style={{ fontSize: 28, fontFamily: 'Georgia, serif', color: ROSE, lineHeight: 1 }}>{aed(currentNetProfit - 7000)}</div>
-            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>+{aed(4000)} rent, +{aed(3000)} staff</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'center' }}>
+            <div style={{ padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+              <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 }}>Returns Impact</div>
+              <div style={{ fontSize: 14, fontFamily: 'Georgia, serif', color: T1 }}>
+                {returnsReduction > 0 ? `${m(Math.round(totalReturns * returnsReduction / 100))}/yr saved` : m(Math.round(totalReturns)) + '/yr current'}
+              </div>
+              <div style={{ fontSize: 9, color: T2, marginTop: 4 }}>
+                {returnsReduction}% reduction = {m(Math.round(returnsSaving))}/mo additional profit
+              </div>
+            </div>
+            <div style={{ padding: 16, background: totalAdjustedNet > 0 ? 'rgba(88,152,122,0.06)' : 'rgba(191,95,89,0.06)', borderRadius: 8, border: `1px solid ${totalAdjustedNet > 0 ? 'rgba(88,152,122,0.2)' : 'rgba(191,95,89,0.2)'}` }}>
+              <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', color: totalAdjustedNet > 0 ? SAGE : ROSE, marginBottom: 6 }}>Breakeven Revenue</div>
+              <div style={{ fontSize: 14, fontFamily: 'Georgia, serif', color: T1 }}>
+                {breakevenRevenue === Infinity ? 'N/A' : m(breakevenRevenue) + '/mo'}
+              </div>
+              <div style={{ fontSize: 9, color: T2, marginTop: 4 }}>
+                Need {breakevenRevenue === Infinity ? '—' : m(breakevenRevenue)} monthly revenue to cover {m(adjustedCosts)} costs at {adjustedMargin}% margin
+              </div>
+            </div>
           </div>
         </div>
       </ChartCard>
@@ -4353,7 +4527,7 @@ export default function Home() {
       <div>
         <BranchSelectorBar view={view} onChange={handleViewChange} />
         <div style={{ display: 'flex', minHeight: 'calc(100vh - 44px)' }}>
-          <Sidebar active={activePage} onChange={setActivePage} branchLabel={sidebarLabel} />
+          <Sidebar active={activePage} onChange={setActivePage} branchLabel={sidebarLabel} alertCount={computeAlertCount(storeData)} />
           <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <div style={{ textAlign: 'center' }}>
               <RefreshCw size={28} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} />
@@ -4369,7 +4543,7 @@ export default function Home() {
     <div style={{ minHeight: '100vh' }}>
       <BranchSelectorBar view={view} onChange={handleViewChange} />
       <div style={{ display: 'flex', minHeight: 'calc(100vh - 44px)' }}>
-        <Sidebar active={activePage} onChange={setActivePage} branchLabel={sidebarLabel} />
+        <Sidebar active={activePage} onChange={setActivePage} branchLabel={sidebarLabel} alertCount={computeAlertCount(storeData)} />
         <main style={{
           flex: 1, padding: '24px 28px', maxWidth: 1200, minWidth: 0,
           overflowX: 'hidden',

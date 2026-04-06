@@ -175,3 +175,37 @@ Stage Summary:
 - All 6 data mutation points in Data Center trigger global data refresh
 - Forecast, Alerts, Products, Staff, Marketing pages all re-fetch and re-compute predictions with fresh data
 - Lint: 0 errors, Compilation: ✓ success
+
+---
+Task ID: 7
+Agent: main
+Task: Fix alerts sidebar badge + upgrade What-If simulator with interactive controls
+
+Work Log:
+- **Alerts Sidebar Fix**:
+  - Replaced hardcoded `badge: '4'` with dynamic `badge: '__ALERT_COUNT__'` sentinel value
+  - Added `alertCount` prop to Sidebar component, passed from Home
+  - Created `computeAlertCount(data)` function that mirrors AlertsPage alert logic (payback > 24mo, key money > 20%, anomaly spikes/dips, trend direction, card loyalty)
+  - Badge renders dynamic count, turns green when 0 (no alerts)
+  - Updated AlertsPage to conditionally show payback and key money alerts (only when threshold exceeded), matching sidebar logic
+
+- **What-If Simulator Overhaul**:
+  - Replaced static toggle-card approach with 6 interactive range sliders:
+    - Rent Change (−5K to +15K/mo)
+    - Staff Cost Change (−3K to +10K/mo)
+    - Revenue Growth (−30% to +100%)
+    - Marketing Budget (−10K to +10K/mo)
+    - Returns Reduction (0–100%)
+    - Margin Shift (−15 to +15 percentage points)
+  - Added 4 quick-preset scenario buttons: Optimistic Growth, Cost Crisis, Lean Operations, Expansion Mode, Reset
+  - Added Live P&L Impact panel with 4 KPIs: Gross Profit, Monthly Costs, Net Profit (with delta), Payback Period
+  - Added dynamic revenue comparison chart (Current vs Simulated bars + line)
+  - Added Adjusted Cost Structure panel with per-cost-item progress bars and breakeven/returns impact cards
+  - Extracted RangeSlider component outside SimulatorPage to satisfy React hooks/static-components lint rule
+  - All calculations are cumulative (sliders stack together) and real-time
+
+Stage Summary:
+- Alerts sidebar now shows dynamic count computed from actual data (not hardcoded)
+- What-If section fully interactive with 6 sliders + 4 presets + live P&L + charts + cost breakdown
+- All calculations are cumulative and reflect combined impact of all slider adjustments
+- Lint: 0 errors, Compilation: ✓ success
