@@ -215,6 +215,8 @@ interface StoreData {
   branchNames: string[];
   currency: string;
   branchComparison?: { branchId: string; branchName: string; totalNet: number; monthCount: number }[];
+  // Data version counter — incremented on data mutations to trigger re-renders
+  dataVersion: number;
 }
 
 const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -257,7 +259,7 @@ function getCurrencyForView(view: ViewMode): string {
   return 'AED'; // all → default AED
 }
 
-function useStoreData(view: ViewMode): { loading: boolean; hasData: boolean } & StoreData {
+function useStoreData(view: ViewMode, dataVersion: number): { loading: boolean; hasData: boolean } & StoreData {
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(true);
   const isAgg = isAggregateView(view);
@@ -281,6 +283,7 @@ function useStoreData(view: ViewMode): { loading: boolean; hasData: boolean } & 
     branchCount: isAgg ? 0 : 1,
     branchNames: [],
     currency,
+    dataVersion,
   });
 
   useEffect(() => {
@@ -450,7 +453,7 @@ function useStoreData(view: ViewMode): { loading: boolean; hasData: boolean } & 
       finally { setLoading(false); }
     }
     fetchData();
-  }, [view, currency]);
+  }, [view, currency, dataVersion]);
 
   return { loading, hasData, ...data };
 }
@@ -2725,7 +2728,10 @@ function DataCenterPage({ data }: { data: StoreData }) {
       });
       const data = await res.json();
       setSeedResult(data);
-      if (data.success) setSeeded(true);
+      if (data.success) {
+        setSeeded(true);
+        window.dispatchEvent(new Event('parfumix:data-changed'));
+      }
       fetchStatus();
     } catch (e) {
       console.error('Seed failed:', e);
@@ -2744,6 +2750,7 @@ function DataCenterPage({ data }: { data: StoreData }) {
       setResetDone(true);
       setTimeout(() => setResetDone(false), 3000);
       fetchStatus();
+      window.dispatchEvent(new Event('parfumix:data-changed'));
     } catch (e) {
       console.error('Reset failed:', e);
     } finally {
@@ -2764,6 +2771,7 @@ function DataCenterPage({ data }: { data: StoreData }) {
       const data = await res.json();
       setUploadResults(prev => ({ ...prev, [category]: data }));
       fetchStatus();
+      if (data.success) window.dispatchEvent(new Event('parfumix:data-changed'));
     } catch (e) {
       console.error('Upload failed:', e);
     } finally {
@@ -2783,6 +2791,7 @@ function DataCenterPage({ data }: { data: StoreData }) {
       const data = await res.json();
       setSaveResult(data.success ? 'Data saved successfully' : 'Failed to save data');
       fetchStatus();
+      if (data.success) window.dispatchEvent(new Event('parfumix:data-changed'));
     } catch {
       setSaveResult('Error saving data');
     } finally {
@@ -3783,8 +3792,9 @@ function ProductsPage({ data }: { data: StoreData }) {
         setProducts(res || []);
       } finally { setLoading(false); }
     }
+    setLoading(true);
     load();
-  }, []);
+  }, [data.dataVersion]);
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
   if (products.length === 0) return (
@@ -3945,8 +3955,9 @@ function StaffPage({ data }: { data: StoreData }) {
         setTransactions(txRes || []);
       } finally { setLoading(false); }
     }
+    setLoading(true);
     load();
-  }, []);
+  }, [data.dataVersion]);
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
   if (staff.length === 0) return (
@@ -4110,8 +4121,9 @@ function MarketingPage({ data }: { data: StoreData }) {
         setTransactions(txRes || []);
       } finally { setLoading(false); }
     }
+    setLoading(true);
     load();
-  }, []);
+  }, [data.dataVersion]);
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
   if (marketing.length === 0) return (
@@ -4303,18 +4315,26 @@ export default function Home() {
   const [activePage, setActivePage] = useState<PageId>('dashboard');
   const viewFromStore = useHydratedViewMode();
   const [view, setView] = useState<ViewMode>(viewFromStore);
+  const [dataVersion, setDataVersion] = useState(0);
 
   // Keep local state in sync with store changes (e.g. from another tab)
   useEffect(() => {
     setView(viewFromStore);
   }, [viewFromStore]);
 
+  // Listen for data mutations from Data Center (seed, upload, reset, manual save)
+  useEffect(() => {
+    const handler = () => setDataVersion(v => v + 1);
+    window.addEventListener('parfumix:data-changed', handler);
+    return () => window.removeEventListener('parfumix:data-changed', handler);
+  }, []);
+
   const handleViewChange = useCallback((newView: ViewMode) => {
     setView(newView);
     saveViewMode(newView);
   }, []);
 
-  const storeData = useStoreData(view);
+  const storeData = useStoreData(view, dataVersion);
   const PageComponent = pageComponents[activePage];
 
   const sidebarLabel = useMemo(() => {

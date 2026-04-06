@@ -146,3 +146,32 @@ Stage Summary:
 - All predictions computed from actual data using statistical algorithms
 - No hardcoded forecast values remain (FORECAST import retained for backward compat but not used for display)
 - Lint: 0 errors, Compilation: ✓ success
+
+---
+Task ID: 6
+Agent: main
+Task: Make predictions dynamic — recalculate when new data is uploaded via Data Center
+
+Work Log:
+- Diagnosed root cause: predictions were NOT updating after data upload because all data-fetching hooks only ran on mount or view change
+  - `useStoreData` deps: `[view, currency]` — no trigger on data mutation
+  - `ProductsPage` useEffect deps: `[]` — only runs on mount
+  - `StaffPage` useEffect deps: `[]` — only runs on mount
+  - `MarketingPage` useEffect deps: `[]` — only runs on mount
+  - Data Center seed/upload/reset only called `fetchStatus()` — no global data refresh
+- Added `dataVersion: number` field to `StoreData` interface
+- Modified `useStoreData(view, dataVersion)` to accept dataVersion as second param and include in useEffect dependency array
+- Added `dataVersion` state in `Home` component, initialized to 0
+- Added event listener in `Home` for `parfumix:data-changed` custom event → increments `dataVersion`
+- Updated `ProductsPage`, `StaffPage`, `MarketingPage` to use `data.dataVersion` in their useEffect deps (with loading state reset)
+- Updated `DataCenterPage` to dispatch `parfumix:data-changed` event after:
+  - Successful seed (handleSeed)
+  - Successful upload (handleUpload)
+  - Successful reset (handleReset)
+  - Successful manual save (handleManualSave)
+
+Stage Summary:
+- Predictions now automatically recalculate when data is uploaded, seeded, or reset via Data Center
+- All 6 data mutation points in Data Center trigger global data refresh
+- Forecast, Alerts, Products, Staff, Marketing pages all re-fetch and re-compute predictions with fresh data
+- Lint: 0 errors, Compilation: ✓ success
