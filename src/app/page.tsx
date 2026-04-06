@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from 'react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   ComposedChart, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -4111,9 +4111,46 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   'data-center': (props) => <DataCenterPage {...props} />,
 };
 
+// ══════════════════════════════════════════════════════════════════
+// HYDRATION-SAFE VIEW MODE HOOK
+// ══════════════════════════════════════════════════════════════════
+function useHydratedViewMode(): ViewMode {
+  // Server always returns the default branch for consistent SSR output
+  const serverSnapshot: ViewMode = { type: 'branch', slug: DEFAULT_BRANCH_SLUG };
+
+  const subscribe = useCallback((callback: () => void) => {
+    window.addEventListener('storage', callback);
+    return () => window.removeEventListener('storage', callback);
+  }, []);
+
+  const getSnapshot = useCallback((): ViewMode => {
+    try {
+      const stored = localStorage.getItem(BRANCH_LS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.type === 'branch' && parsed.slug) return parsed;
+        if (parsed.type === 'all') return { type: 'all' };
+        if (parsed.type === 'country') return parsed;
+        if (parsed.type === 'city') return parsed;
+      }
+    } catch {}
+    return serverSnapshot;
+  }, []);
+
+  const getServerSnapshot = useCallback((): ViewMode => serverSnapshot, []);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
 export default function Home() {
   const [activePage, setActivePage] = useState<PageId>('dashboard');
-  const [view, setView] = useState<ViewMode>(loadViewMode);
+  const viewFromStore = useHydratedViewMode();
+  const [view, setView] = useState<ViewMode>(viewFromStore);
+
+  // Keep local state in sync with store changes (e.g. from another tab)
+  useEffect(() => {
+    setView(viewFromStore);
+  }, [viewFromStore]);
 
   const handleViewChange = useCallback((newView: ViewMode) => {
     setView(newView);

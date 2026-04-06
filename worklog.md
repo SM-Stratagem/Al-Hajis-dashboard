@@ -79,3 +79,23 @@ Stage Summary:
 - Total dashboard sections: 18 (was 15)
 - Each section independently fetches its own data from the API
 - Graceful empty states shown when no data is available
+
+---
+Task ID: 4
+Agent: main
+Task: Fix hydration mismatch error in BranchSelectorBar component
+
+Work Log:
+- Diagnosed hydration mismatch: loadViewMode() returned different values on server (default branch) vs client (localStorage-persisted "all" view)
+- Root cause: useState(loadViewMode) lazy initializer runs on both SSR and client hydration, reading different values from localStorage
+- Initial attempt with useEffect+setState blocked by `react-hooks/set-state-in-effect` lint rule
+- Second attempt with ref during render blocked by `react-hooks/refs` lint rule
+- Final fix: implemented `useHydratedViewMode()` hook using `useSyncExternalStore` with separate `getServerSnapshot` that always returns the default branch
+- Added `useSyncExternalStore` to React imports
+- Hydration-safe: server always renders default branch, client re-renders with persisted view after mount via storage event subscription
+
+Stage Summary:
+- Hydration mismatch resolved using React's recommended `useSyncExternalStore` pattern
+- Lint passes cleanly (0 errors, 0 warnings)
+- No compilation errors
+- Verified all 3 Analytics sections (Product Analytics, Staff Productivity, Marketing ROI) are already fully implemented from previous session
