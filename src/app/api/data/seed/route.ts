@@ -4,17 +4,18 @@ import {
   SEED_MONTHLY_SALES, SEED_DAILY_SALES, SEED_CAPEX,
   SEED_OVERHEADS, SEED_PNL,
 } from '@/lib/seed-data';
-import { DEFAULT_BRANCH_SLUG } from '@/lib/branches';
+import { DEFAULT_BRANCH_SLUG, BRANCHES, getBranchBySlug } from '@/lib/branches';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { confirm, branchSlug } = body;
     const slug = branchSlug || DEFAULT_BRANCH_SLUG;
+    const branchDef = getBranchBySlug(slug);
 
     if (!confirm) {
       return NextResponse.json({
-        message: `This will seed the ${slug} branch database with existing Parfumix data. Set confirm: true to proceed.`,
+        message: `This will seed the ${branchDef?.name || slug} branch database with existing Parfumix data. Set confirm: true to proceed.`,
         branch: slug,
         what: [
           '6 months of monthly sales (Oct 2025 – Mar 2026)',
@@ -26,16 +27,17 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Ensure the branch exists
+    // Ensure the branch exists with correct info from BRANCHES array
     const branch = await db.branch.upsert({
       where: { slug },
       create: {
-        name: slug === 'adcb' ? 'Parfumix ADCB (Karama)' : `Parfumix ${slug}`,
+        name: branchDef?.name || `Parfumix ${slug}`,
         slug,
-        city: slug === 'adcb' ? 'Dubai' : 'Unknown',
-        country: 'UAE',
-        flag: '🇦🇪',
-        currency: 'AED',
+        city: branchDef?.city || 'Unknown',
+        country: branchDef?.country || 'UAE',
+        flag: branchDef?.flag || '🇦🇪',
+        currency: branchDef?.currency || 'AED',
+        sortOrder: branchDef?.sortOrder || 0,
       },
       update: {},
     });

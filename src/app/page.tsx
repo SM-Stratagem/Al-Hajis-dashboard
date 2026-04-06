@@ -35,8 +35,28 @@ import {
 // ══════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════
-const aed = (n: number) => `AED ${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-const aedK = (n: number) => `AED ${(n / 1000).toFixed(0)}K`;
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  AED: 'AED',
+  OMR: 'OMR',
+  BHD: 'BHD',
+};
+
+const fmtCurrency = (n: number, currency: string = 'AED') => {
+  const sym = CURRENCY_SYMBOLS[currency] || currency;
+  return `${sym} ${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
+
+const fmtCurrencyK = (n: number, currency: string = 'AED') => {
+  const sym = CURRENCY_SYMBOLS[currency] || currency;
+  return `${sym} ${(n / 1000).toFixed(0)}K`;
+};
+
+// Backward-compatible aliases (used by existing components)
+const aed = (n: number) => fmtCurrency(n, 'AED');
+const aedK = (n: number) => fmtCurrencyK(n, 'AED');
+// Currency-aware versions
+const money = (n: number, cur: string = 'AED') => fmtCurrency(n, cur);
+const moneyK = (n: number, cur: string = 'AED') => fmtCurrencyK(n, cur);
 const pct = (n: number) => `${n.toFixed(1)}%`;
 const serif = { fontFamily: 'Georgia, "Times New Roman", serif' };
 
@@ -132,6 +152,15 @@ const catColors: Record<string, string> = {
 };
 
 // ══════════════════════════════════════════════════════════════════
+// VIEW MODE (must be before useStoreData)
+// ══════════════════════════════════════════════════════════════════
+type ViewMode = { type: 'all' } | { type: 'country'; country: string; flag: string } | { type: 'city'; city: string; country: string; flag: string } | { type: 'branch'; slug: string };
+
+function isAggregateView(view: ViewMode): boolean {
+  return view.type === 'all' || view.type === 'country' || view.type === 'city';
+}
+
+// ══════════════════════════════════════════════════════════════════
 // STORE DATA TYPE & HOOK
 // ══════════════════════════════════════════════════════════════════
 interface StoreData {
@@ -143,8 +172,8 @@ interface StoreData {
   cash: number[];
   card: number[];
   daily: { startDay: number; values: number[] }[];
-  capexItems: { name: string; amount: number; category: string }[];
-  overheads: { name: string; amount: number }[];
+  capexItems: { name: string; amount: number; category: string; branchName?: string }[];
+  overheads: { name: string; amount: number; branchName?: string }[];
   pnl: {
     period: string; revenue: number; cogsGoods: number; cogsAccessories: number;
     totalCogs: number; grossProfit: number; grossMargin: number;
@@ -173,6 +202,12 @@ interface StoreData {
     returnRate: number; growth: number | null; cardPct: number;
   }[];
   capexByCategory: { name: string; value: number }[];
+  // Aggregate view fields
+  isAggregate: boolean;
+  branchCount: number;
+  branchNames: string[];
+  currency: string;
+  branchComparison?: { branchId: string; branchName: string; totalNet: number; monthCount: number }[];
 }
 
 const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -203,9 +238,24 @@ function buildCapexByCategory(items: { name: string; amount: number; category: s
   return Object.entries(cats).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 }
 
-function useStoreData(branchSlug: string = DEFAULT_BRANCH_SLUG): { loading: boolean; hasData: boolean } & StoreData {
+function getCurrencyForView(view: ViewMode): string {
+  if (view.type === 'branch') {
+    const b = getBranchBySlug(view.slug);
+    return b?.currency || 'AED';
+  }
+  if (view.type === 'country') {
+    const country = COUNTRIES.find(c => c.name === view.country);
+    return country?.currency || 'AED';
+  }
+  return 'AED'; // all → default AED
+}
+
+function useStoreData(view: ViewMode): { loading: boolean; hasData: boolean } & StoreData {
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(true);
+  const isAgg = isAggregateView(view);
+  const currency = getCurrencyForView(view);
+
   const [data, setData] = useState<StoreData>({
     months: [...MONTHS], monthsFull: [...MONTHS_FULL],
     gross: [...GROSS], returns: [...RETURNS], net: [...NET], cash: [...CASH], card: [...CARD],
@@ -220,80 +270,187 @@ function useStoreData(branchSlug: string = DEFAULT_BRANCH_SLUG): { loading: bool
     totalCapex: TOTAL_CAPEX, totalOverheads: TOTAL_OVERHEADS, totalInvestment: TOTAL_INVESTMENT,
     monthlyData: monthlyData.map(d => ({ ...d })),
     capexByCategory: capexByCategory.map(c => ({ ...c })),
+    isAggregate: isAgg,
+    branchCount: isAgg ? 0 : 1,
+    branchNames: [],
+    currency,
   });
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const qs = branchSlug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(branchSlug)}` : '';
-        const [msRes, dailyRes, capexRes, ohRes, pnlRes] = await Promise.all([
-          fetch(`/api/data/monthly-sales${qs}`).then(r => r.json()).catch(() => []),
-          fetch(`/api/data/daily-sales${qs}`).then(r => r.json()).catch(() => []),
-          fetch(`/api/data/capex${qs}`).then(r => r.json()).catch(() => []),
-          fetch(`/api/data/overheads${qs}`).then(r => r.json()).catch(() => []),
-          fetch(`/api/data/pnl${qs}`).then(r => r.json()).catch(() => []),
-        ]);
-        if (msRes && msRes.length > 0) {
-          setHasData(true);
-          const months = msRes.map((ms: any) => `${MN[ms.month - 1]} ${String(ms.year).slice(2)}`);
-          const monthsFull = msRes.map((ms: any) => `${MNF[ms.month - 1]} ${ms.year}`);
-          const gross = msRes.map((ms: any) => ms.gross);
-          const returns = msRes.map((ms: any) => ms.returns);
-          const net = msRes.map((ms: any) => ms.net);
-          const cash = msRes.map((ms: any) => ms.cash);
-          const card = msRes.map((ms: any) => ms.card);
-          const d = deriveMetrics(gross, returns, net, cash, card);
+        if (isAggregateView(view)) {
+          // ── Aggregate view: fetch from /api/data/aggregate ──
+          const params = new URLSearchParams();
+          if (view.type === 'country') {
+            params.set('viewType', 'country');
+            params.set('country', view.country);
+          } else if (view.type === 'city') {
+            params.set('viewType', 'city');
+            params.set('country', view.country);
+            params.set('city', view.city);
+          } else {
+            params.set('viewType', 'all');
+          }
 
-          let daily = DAILY.map(dd => ({ ...dd }));
-          if (dailyRes.length > 0) {
-            const grouped = new Map<string, any[]>();
-            dailyRes.forEach((ds: any) => { const k = `${ds.month}-${ds.year}`; if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(ds); });
-            daily = msRes.map((ms: any) => {
-              const days = grouped.get(`${ms.month}-${ms.year}`) || [];
-              return days.length > 0 ? { startDay: days[0].dayOfWeek, values: days.map((dd: any) => dd.revenue) } : { startDay: 0, values: [] };
+          const aggRes = await fetch(`/api/data/aggregate?${params}`).then(r => r.json()).catch(() => null);
+          if (aggRes && aggRes.monthlySales && aggRes.monthlySales.length > 0) {
+            setHasData(true);
+            const msRes = aggRes.monthlySales;
+            const dailyRes = aggRes.dailySales || [];
+            const capexRes = aggRes.capexItems || [];
+            const ohRes = aggRes.overheads || [];
+            const pnlRes = aggRes.pnl || [];
+
+            const months = msRes.map((ms: any) => `${MN[ms.month - 1]} ${String(ms.year).slice(2)}`);
+            const monthsFull = msRes.map((ms: any) => `${MNF[ms.month - 1]} ${ms.year}`);
+            const gross = msRes.map((ms: any) => ms.gross);
+            const returns = msRes.map((ms: any) => ms.returns);
+            const net = msRes.map((ms: any) => ms.net);
+            const cash = msRes.map((ms: any) => ms.cash);
+            const card = msRes.map((ms: any) => ms.card);
+            const d = deriveMetrics(gross, returns, net, cash, card);
+
+            // Build daily data from aggregated daily sales
+            let daily = DAILY.map(dd => ({ ...dd }));
+            if (dailyRes.length > 0) {
+              const grouped = new Map<string, any[]>();
+              dailyRes.forEach((ds: any) => {
+                const dateStr = ds.date;
+                const parts = dateStr.split('-');
+                const month = parseInt(parts[1]);
+                const year = parseInt(parts[0]);
+                const k = `${month}-${year}`;
+                if (!grouped.has(k)) grouped.set(k, []);
+                grouped.get(k)!.push({ ...ds, month, year });
+              });
+              daily = msRes.map((ms: any) => {
+                const days = grouped.get(`${ms.month}-${ms.year}`) || [];
+                return days.length > 0
+                  ? { startDay: days[0].dayOfWeek, values: days.sort((a: any, b: any) => a.date.localeCompare(b.date)).map((dd: any) => dd.revenue) }
+                  : { startDay: 0, values: [] };
+              });
+            }
+
+            // P&L
+            let pnl = { ...PNL, expenses: PNL.expenses.map(e => ({ ...e })) };
+            if (pnlRes.length > 0) {
+              const f = pnlRes[0];
+              pnl = {
+                period: f.period || `${monthsFull[0]} – ${monthsFull[monthsFull.length - 1]}`,
+                revenue: f.revenue, cogsGoods: f.cogsGoods, cogsAccessories: f.cogsAccessories,
+                totalCogs: f.totalCogs, grossProfit: f.grossProfit, grossMargin: f.grossMargin,
+                totalExpenses: f.totalExpenses, netProfitLoss: f.netProfitLoss,
+                expenses: (f.expenses || []).map((e: any) => ({ name: e.name, amount: e.amount })),
+              };
+            }
+
+            const capexItems = capexRes.length > 0
+              ? capexRes.map((c: any) => ({ name: c.branchName ? `${c.name} (${c.branchName.replace('Parfumix ', '')})` : c.name, amount: c.amount, category: c.category, branchName: c.branchName }))
+              : [];
+            const overheads = ohRes.length > 0
+              ? ohRes.map((o: any) => ({ name: o.branchName ? `${o.name} (${o.branchName.replace('Parfumix ', '')})` : o.name, amount: o.amount, branchName: o.branchName }))
+              : [];
+            const totalCapex = capexItems.reduce((s: number, i: any) => s + i.amount, 0);
+            const totalOverheads = overheads.reduce((s: number, o: any) => s + o.amount, 0);
+            const totalInvestment = totalCapex + totalOverheads;
+            const capitalRecovered = totalInvestment > 0 ? (d.totalNet / totalInvestment) * 100 : 0;
+            const avgReturnRate = d.totalGross > 0 ? (d.totalReturns / d.totalGross) * 100 : 0;
+            const cardShare = d.totalNet > 0 ? (d.totalCard / d.totalNet) * 100 : 0;
+
+            setData({
+              months, monthsFull, gross, returns, net, cash, card, daily,
+              capexItems, overheads, pnl,
+              ...d, capitalRecovered, avgReturnRate, cardShare,
+              totalCapex, totalOverheads, totalInvestment,
+              monthlyData: buildMonthlyData(months, monthsFull, gross, returns, net, cash, card, d.cumulativeNet, d.returnRates, d.momGrowth, d.cardPct),
+              capexByCategory: buildCapexByCategory(capexItems),
+              isAggregate: true,
+              branchCount: aggRes.branchCount || 0,
+              branchNames: aggRes.branchNames || [],
+              currency,
+              branchComparison: aggRes.branchComparison || [],
             });
+          } else {
+            // Aggregate view but no data in any matching branches
+            setData(prev => ({ ...prev, isAggregate: true, branchCount: aggRes?.branchCount || 0, branchNames: aggRes?.branchNames || [], currency }));
+            setHasData(false);
           }
+        } else {
+          // ── Single branch view: fetch from individual APIs ──
+          const slug = view.slug;
+          const qs = slug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(slug)}` : '';
+          const [msRes, dailyRes, capexRes, ohRes, pnlRes] = await Promise.all([
+            fetch(`/api/data/monthly-sales${qs}`).then(r => r.json()).catch(() => []),
+            fetch(`/api/data/daily-sales${qs}`).then(r => r.json()).catch(() => []),
+            fetch(`/api/data/capex${qs}`).then(r => r.json()).catch(() => []),
+            fetch(`/api/data/overheads${qs}`).then(r => r.json()).catch(() => []),
+            fetch(`/api/data/pnl${qs}`).then(r => r.json()).catch(() => []),
+          ]);
+          if (msRes && msRes.length > 0) {
+            setHasData(true);
+            const months = msRes.map((ms: any) => `${MN[ms.month - 1]} ${String(ms.year).slice(2)}`);
+            const monthsFull = msRes.map((ms: any) => `${MNF[ms.month - 1]} ${ms.year}`);
+            const gross = msRes.map((ms: any) => ms.gross);
+            const returns = msRes.map((ms: any) => ms.returns);
+            const net = msRes.map((ms: any) => ms.net);
+            const cash = msRes.map((ms: any) => ms.cash);
+            const card = msRes.map((ms: any) => ms.card);
+            const d = deriveMetrics(gross, returns, net, cash, card);
 
-          let pnl = { ...PNL, expenses: PNL.expenses.map(e => ({ ...e })) };
-          if (pnlRes.length > 0) {
-            const f = pnlRes[0];
-            pnl = { period: f.period, revenue: f.revenue, cogsGoods: f.cogsGoods, cogsAccessories: f.cogsAccessories, totalCogs: f.totalCogs, grossProfit: f.grossProfit, grossMargin: f.grossMargin, totalExpenses: f.totalExpenses, netProfitLoss: f.netProfitLoss, expenses: (f.expenses || []).map((e: any) => ({ name: e.name, amount: e.amount })) };
+            let daily = DAILY.map(dd => ({ ...dd }));
+            if (dailyRes.length > 0) {
+              const grouped = new Map<string, any[]>();
+              dailyRes.forEach((ds: any) => { const k = `${ds.month}-${ds.year}`; if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(ds); });
+              daily = msRes.map((ms: any) => {
+                const days = grouped.get(`${ms.month}-${ms.year}`) || [];
+                return days.length > 0 ? { startDay: days[0].dayOfWeek, values: days.map((dd: any) => dd.revenue) } : { startDay: 0, values: [] };
+              });
+            }
+
+            let pnl = { ...PNL, expenses: PNL.expenses.map(e => ({ ...e })) };
+            if (pnlRes.length > 0) {
+              const f = pnlRes[0];
+              pnl = { period: f.period, revenue: f.revenue, cogsGoods: f.cogsGoods, cogsAccessories: f.cogsAccessories, totalCogs: f.totalCogs, grossProfit: f.grossProfit, grossMargin: f.grossMargin, totalExpenses: f.totalExpenses, netProfitLoss: f.netProfitLoss, expenses: (f.expenses || []).map((e: any) => ({ name: e.name, amount: e.amount })) };
+            }
+
+            const capexItems = capexRes.length > 0 ? capexRes.map((c: any) => ({ name: c.name, amount: c.amount, category: c.category })) : CAPEX_ITEMS.map(i => ({ ...i }));
+            const overheads = ohRes.length > 0 ? ohRes.map((o: any) => ({ name: o.name, amount: o.amount })) : OVERHEADS.map(o => ({ ...o }));
+            const totalCapex = capexItems.reduce((s: number, i: any) => s + i.amount, 0);
+            const totalOverheads = overheads.reduce((s: number, o: any) => s + o.amount, 0);
+            const totalInvestment = totalCapex + totalOverheads;
+            const capitalRecovered = (d.totalNet / totalInvestment) * 100;
+            const avgReturnRate = (d.totalReturns / d.totalGross) * 100;
+            const cardShare = (d.totalCard / d.totalNet) * 100;
+
+            setData({
+              months, monthsFull, gross, returns, net, cash, card, daily,
+              capexItems, overheads, pnl,
+              ...d, capitalRecovered, avgReturnRate, cardShare,
+              totalCapex, totalOverheads, totalInvestment,
+              monthlyData: buildMonthlyData(months, monthsFull, gross, returns, net, cash, card, d.cumulativeNet, d.returnRates, d.momGrowth, d.cardPct),
+              capexByCategory: buildCapexByCategory(capexItems),
+              isAggregate: false,
+              branchCount: 1,
+              branchNames: [getBranchBySlug(slug)?.name || slug],
+              currency,
+            });
+          } else if (msRes && msRes.length === 0) {
+            setHasData(false);
           }
-
-          const capexItems = capexRes.length > 0 ? capexRes.map((c: any) => ({ name: c.name, amount: c.amount, category: c.category })) : CAPEX_ITEMS.map(i => ({ ...i }));
-          const overheads = ohRes.length > 0 ? ohRes.map((o: any) => ({ name: o.name, amount: o.amount })) : OVERHEADS.map(o => ({ ...o }));
-          const totalCapex = capexItems.reduce((s: number, i: any) => s + i.amount, 0);
-          const totalOverheads = overheads.reduce((s: number, o: any) => s + o.amount, 0);
-          const totalInvestment = totalCapex + totalOverheads;
-          const capitalRecovered = (d.totalNet / totalInvestment) * 100;
-          const avgReturnRate = (d.totalReturns / d.totalGross) * 100;
-          const cardShare = (d.totalCard / d.totalNet) * 100;
-
-          setData({
-            months, monthsFull, gross, returns, net, cash, card, daily,
-            capexItems, overheads, pnl,
-            ...d, capitalRecovered, avgReturnRate, cardShare,
-            totalCapex, totalOverheads, totalInvestment,
-            monthlyData: buildMonthlyData(months, monthsFull, gross, returns, net, cash, card, d.cumulativeNet, d.returnRates, d.momGrowth, d.cardPct),
-            capexByCategory: buildCapexByCategory(capexItems),
-          });
-        } else if (msRes && msRes.length === 0) {
-          setHasData(false);
         }
       } catch (e) { console.error('Failed to fetch store data:', e); }
       finally { setLoading(false); }
     }
     fetchData();
-  }, [branchSlug]);
+  }, [view, currency]);
 
   return { loading, hasData, ...data };
 }
 
 // ══════════════════════════════════════════════════════════════════
-// BRANCH VIEW MODE
+// BRANCH VIEW MODE — localStorage persistence
 // ══════════════════════════════════════════════════════════════════
-type ViewMode = { type: 'all' } | { type: 'country'; country: string; flag: string } | { type: 'city'; city: string; country: string; flag: string } | { type: 'branch'; slug: string };
-
 const BRANCH_LS_KEY = 'parfumix:selectedView';
 
 function loadViewMode(): ViewMode {
@@ -344,15 +501,6 @@ function getViewSubLabel(view: ViewMode): string {
       return b ? `${b.flag} ${b.city}, ${b.country}` : '';
     }
   }
-}
-
-function getBranchSlugForView(view: ViewMode): string | null {
-  if (view.type === 'branch') return view.slug;
-  return null;
-}
-
-function isAggregateView(view: ViewMode): boolean {
-  return view.type === 'all' || view.type === 'country' || view.type === 'city';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -651,6 +799,7 @@ function BranchSelectorBar({ view, onChange }: { view: ViewMode; onChange: (v: V
 // ══════════════════════════════════════════════════════════════════
 function NoDataPage({ view }: { view: ViewMode }) {
   const label = getViewLabel(view);
+  const isAgg = isAggregateView(view);
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -665,9 +814,9 @@ function NoDataPage({ view }: { view: ViewMode }) {
       </div>
       <h2 style={{ fontSize: 16, color: T1, marginBottom: 8, fontWeight: 500 }}>No Data Available</h2>
       <p style={{ fontSize: 12, color: T2, maxWidth: 400, lineHeight: 1.7, marginBottom: 16 }}>
-        {view.type === 'branch'
-          ? `Data for this branch has not been loaded yet. Use the Data Center to seed or upload data.`
-          : `${label} — Aggregate views are coming soon. For now, select an individual branch.`
+        {isAgg
+          ? `None of the ${label.includes('All Branches') ? '20 branches' : 'matching branches'} have data loaded yet. Seed data for individual branches first.`
+          : `Data for this branch has not been loaded yet. Use the Data Center to seed or upload data.`
         }
       </p>
       <div style={{
@@ -675,7 +824,7 @@ function NoDataPage({ view }: { view: ViewMode }) {
         background: 'rgba(201,165,90,0.08)', border: `1px solid rgba(201,165,90,0.15)`,
         fontSize: 10, color: GOLD,
       }}>
-        {view.type === 'branch' ? 'Go to Data Center → Load Existing Data' : 'Coming Soon'}
+        {isAgg ? 'Select a branch → Data Center → Load Existing Data' : 'Go to Data Center → Load Existing Data'}
       </div>
     </div>
   );
@@ -771,26 +920,52 @@ function Sidebar({ active, onChange, branchLabel }: { active: PageId; onChange: 
 // PAGE 1: DASHBOARD
 // ══════════════════════════════════════════════════════════════════
 function DashboardPage({ data }: { data: StoreData }) {
-  const { months: MONTHS, monthsFull: MONTHS_FULL, net: NET, capexItems: CAPEX_ITEMS, totalInvestment: TOTAL_INVESTMENT, totalNet, avgMonthlyNet, capitalRecovered, totalReturns, avgReturnRate, cardShare, totalCard, totalCash, monthlyData } = data;
-  const bestMonthIdx = NET.indexOf(Math.max(...NET));
-  const keyMoneyBurden = ((CAPEX_ITEMS[0].amount / TOTAL_INVESTMENT) * 100).toFixed(1);
+  const { months: MONTHS, monthsFull: MONTHS_FULL, net: NET, capexItems: CAPEX_ITEMS, totalInvestment: TOTAL_INVESTMENT, totalNet, avgMonthlyNet, capitalRecovered, totalReturns, avgReturnRate, cardShare, totalCard, totalCash, monthlyData, isAggregate, branchCount, branchNames, currency: cur, branchComparison } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+  const bestMonthIdx = NET.length > 0 ? NET.indexOf(Math.max(...NET)) : 0;
+  const keyMoneyBurden = CAPEX_ITEMS.length > 0 && TOTAL_INVESTMENT > 0 ? ((CAPEX_ITEMS[0].amount / TOTAL_INVESTMENT) * 100).toFixed(1) : '—';
+  const lastMonth = MONTHS.length > 0 ? MONTHS[MONTHS.length - 1] : '—';
+  const firstMonth = MONTHS.length > 0 ? MONTHS[0] : '—';
 
   return (
     <div>
+      {/* Aggregate banner */}
+      {isAggregate && branchCount > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
+          padding: '10px 16px', borderRadius: 8,
+          background: 'rgba(201,165,90,0.06)', border: '1px solid rgba(201,165,90,0.12)',
+        }}>
+          <Store size={14} style={{ color: GOLD }} />
+          <div>
+            <div style={{ fontSize: 10, color: T1, fontWeight: 500 }}>
+              {branchCount} {branchCount === 1 ? 'branch' : 'branches'} with data
+            </div>
+            <div style={{ fontSize: 9, color: T3, marginTop: 2 }}>
+              {branchNames.slice(0, 5).join(' · ')}{branchNames.length > 5 ? ` +${branchNames.length - 5} more` : ''}
+            </div>
+          </div>
+          <div style={{ marginLeft: 'auto', fontSize: 9, color: GOLD, padding: '2px 8px', borderRadius: 4, background: `${GOLD}15` }}>
+            AGGREGATE
+          </div>
+        </div>
+      )}
+
       {/* Row 1: 4 KPI */}
       <div className="grid grid-cols-4 gap-3 mb-3">
-        <KpiCard label="Total Investment" value={aed(TOTAL_INVESTMENT)} sub="CAPEX + Overheads" badge="All-in" badgeColor={GOLD} />
-        <KpiCard label="6-Month Net Revenue" value={aed(totalNet)} sub={`${MONTHS[0]} – ${MONTHS[5]}`} badge="Net of returns" badgeColor={SAGE} />
-        <KpiCard label="Avg Monthly Net" value={aed(Math.round(avgMonthlyNet))} sub="6-month average" />
-        <KpiCard label="Capital Recovered" value={pct(capitalRecovered)} sub={`${aed(totalNet)} of ${aed(TOTAL_INVESTMENT)}`} badge={`${Math.round(capitalRecovered)}%`} badgeColor={capitalRecovered > 40 ? SAGE : AMBER} />
+        <KpiCard label={isAggregate ? "Total Investment" : "Total Investment"} value={m(TOTAL_INVESTMENT)} sub={isAggregate ? `Sum across ${branchCount} branches` : "CAPEX + Overheads"} badge="All-in" badgeColor={GOLD} />
+        <KpiCard label={isAggregate ? "Total Net Revenue" : `${MONTHS.length}-Month Net Revenue`} value={m(totalNet)} sub={`${firstMonth} – ${lastMonth}`} badge="Net of returns" badgeColor={SAGE} />
+        <KpiCard label="Avg Monthly Net" value={m(Math.round(avgMonthlyNet))} sub={isAggregate ? `Per month across branches` : `${MONTHS.length}-month average`} />
+        <KpiCard label="Capital Recovered" value={pct(capitalRecovered)} sub={TOTAL_INVESTMENT > 0 ? `${m(totalNet)} of ${m(TOTAL_INVESTMENT)}` : '—'} badge={`${Math.round(capitalRecovered)}%`} badgeColor={capitalRecovered > 40 ? SAGE : AMBER} />
       </div>
 
       {/* Row 2: 4 KPI */}
       <div className="grid grid-cols-4 gap-3 mb-3">
-        <KpiCard label="Total Returns" value={aed(totalReturns)} sub={`Avg rate: ${pct(avgReturnRate)}`} badge={pct(avgReturnRate)} badgeColor={ROSE} />
-        <KpiCard label="Best Month" value={aed(NET[bestMonthIdx])} sub={MONTHS_FULL[bestMonthIdx]} badge="Peak" badgeColor={SAGE} />
-        <KpiCard label="Card Revenue Share" value={pct(cardShare)} sub={`${aed(totalCard)} card / ${aed(totalCash)} cash`} badge="81%+" badgeColor={STEEL} />
-        <KpiCard label="Key Money Burden" value={`${keyMoneyBurden}%`} sub={aed(CAPEX_ITEMS[0].amount)} badge="Sunk cost" badgeColor={ROSE} />
+        <KpiCard label="Total Returns" value={m(totalReturns)} sub={`Avg rate: ${pct(avgReturnRate)}`} badge={pct(avgReturnRate)} badgeColor={ROSE} />
+        <KpiCard label="Best Month" value={NET.length > 0 ? m(NET[bestMonthIdx]) : '—'} sub={MONTHS_FULL[bestMonthIdx] || '—'} badge="Peak" badgeColor={SAGE} />
+        <KpiCard label="Card Revenue Share" value={pct(cardShare)} sub={`${m(totalCard)} card / ${m(totalCash)} cash`} badge={cardShare > 70 ? '70%+' : ''} badgeColor={STEEL} />
+        <KpiCard label="Key Money Burden" value={keyMoneyBurden !== '—' ? `${keyMoneyBurden}%` : '—'} sub={CAPEX_ITEMS.length > 0 ? m(CAPEX_ITEMS[0].amount) : 'No CAPEX data'} badge="Sunk cost" badgeColor={ROSE} />
       </div>
 
       {/* Revenue vs Investment Recovery */}
@@ -799,7 +974,7 @@ function DashboardPage({ data }: { data: StoreData }) {
           <ComposedChart data={monthlyData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
             <XAxis dataKey="month" tick={axisTick} />
-            <YAxis yAxisId="left" tick={axisTick} tickFormatter={v => aedK(v)} />
+            <YAxis yAxisId="left" tick={axisTick} tickFormatter={v => mK(v)} />
             <YAxis yAxisId="right" orientation="right" tick={axisTick} domain={[0, 'auto']} tickFormatter={v => pct(v)} />
             <Tooltip content={<AEDTooltip />} />
             <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: T2 }} />
@@ -818,7 +993,7 @@ function DashboardPage({ data }: { data: StoreData }) {
             <BarChart data={monthlyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
               <XAxis dataKey="month" tick={axisTick} fontSize={8} />
-              <YAxis tick={axisTick} tickFormatter={v => aedK(v)} fontSize={8} />
+              <YAxis tick={axisTick} tickFormatter={v => mK(v)} fontSize={8} />
               <Tooltip content={<AEDTooltip />} />
               <Bar dataKey="net" name="Net" fill={GOLD} radius={[3, 3, 0, 0]} />
             </BarChart>
@@ -853,12 +1028,55 @@ function DashboardPage({ data }: { data: StoreData }) {
                 <Cell fill={STEEL} />
                 <Cell fill={AMBER} />
               </Pie>
-              <Tooltip formatter={(v: number) => aed(v)} contentStyle={ttStyle} />
+              <Tooltip formatter={(v: number) => m(v)} contentStyle={ttStyle} />
               <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: T2 }} />
             </PieChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
+
+      {/* Branch Comparison (aggregate views only) */}
+      {isAggregate && (branchComparison || []).length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <ChartCard title="Revenue by Branch" wide>
+            <div style={{ fontSize: 9, color: T3, marginBottom: 12 }}>
+              Net revenue comparison across {branchCount} {branchCount === 1 ? 'branch' : 'branches'} with data
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {(() => {
+                const maxBranchNet = Math.max(...(branchComparison || []).map(b => b.totalNet), 1);
+                const colors = [GOLD, SAGE, STEEL, AMBER, ROSE, '#7a6fbf', '#bf5f8c', '#5f8cbf', '#8cbf5f', '#bf8c5f'];
+                return (branchComparison || []).map((b, i) => {
+                  const pctWidth = (b.totalNet / maxBranchNet) * 100;
+                  const sharePct = totalNet > 0 ? ((b.totalNet / totalNet) * 100).toFixed(1) : '0';
+                  return (
+                    <div key={b.branchId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 160, fontSize: 9, color: T2, textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {b.branchName.replace('Parfumix ', '')}
+                      </div>
+                      <div style={{ flex: 1, height: 20, background: 'rgba(255,255,255,0.03)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${pctWidth}%`, height: '100%',
+                          background: `linear-gradient(90deg, ${colors[i % colors.length]}55, ${colors[i % colors.length]}25)`,
+                          borderRadius: 4, transition: 'width 0.5s ease',
+                          display: 'flex', alignItems: 'center', padding: '0 8px',
+                        }}>
+                          <span style={{ fontSize: 8, color: T1, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                            {m(b.totalNet)}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ width: 55, fontSize: 9, color: T3, textAlign: 'right' }}>
+                        {sharePct}%
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </ChartCard>
+        </div>
+      )}
     </div>
   );
 }
@@ -2345,7 +2563,8 @@ function WeeklyPage({ data }: { data: StoreData }) {
 // ══════════════════════════════════════════════════════════════════
 // PAGE 15: DATA CENTER
 // ══════════════════════════════════════════════════════════════════
-function DataCenterPage() {
+function DataCenterPage({ data }: { data: StoreData }) {
+  const { isAggregate, branchNames, currency: cur } = data;
   // ── State ──
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -2382,12 +2601,15 @@ function DataCenterPage() {
 
   // ── Handlers ──
   const handleSeed = async () => {
+    if (isAggregate) return; // Cannot seed aggregate view
     setSeeding(true);
     try {
+      const currentView = loadViewMode();
+      const branchSlug = currentView.type === 'branch' ? currentView.slug : DEFAULT_BRANCH_SLUG;
       const res = await fetch('/api/data/seed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true }),
+        body: JSON.stringify({ confirm: true, branchSlug }),
       });
       const data = await res.json();
       setSeedResult(data);
@@ -2521,6 +2743,23 @@ function DataCenterPage() {
         <h2 style={{ fontSize: 14, color: T1, marginBottom: 4 }}>Data Center</h2>
         <p style={{ fontSize: 11, color: T3 }}>Manage database content — seed, upload, reset, and track data completeness</p>
       </div>
+
+      {/* Aggregate view warning */}
+      {isAggregate && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
+          padding: '10px 16px', borderRadius: 8,
+          background: `${AMBER}10`, border: `1px solid ${AMBER}25`,
+        }}>
+          <AlertCircle size={14} style={{ color: AMBER }} />
+          <div>
+            <div style={{ fontSize: 10, color: T1, fontWeight: 500 }}>Aggregate View — Data operations unavailable</div>
+            <div style={{ fontSize: 9, color: T3, marginTop: 2 }}>
+              Switch to an individual branch to seed, upload, or reset data. {branchNames.length} branches currently have data.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ Section 1: Database Status Bar ═══ */}
       <ChartCard title="Database Status" wide>
@@ -3430,7 +3669,7 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   forecast: (props) => <ForecastPage {...props} />,
   simulator: (props) => <SimulatorPage {...props} />,
   gaps: (props) => <GapsPage {...props} />,
-  'data-center': (_props) => <DataCenterPage />,
+  'data-center': (props) => <DataCenterPage {...props} />,
 };
 
 export default function Home() {
@@ -3442,8 +3681,7 @@ export default function Home() {
     saveViewMode(newView);
   }, []);
 
-  const branchSlug = useMemo(() => getBranchSlugForView(view), [view]);
-  const storeData = useStoreData(branchSlug || DEFAULT_BRANCH_SLUG);
+  const storeData = useStoreData(view);
   const PageComponent = pageComponents[activePage];
 
   const sidebarLabel = useMemo(() => {
@@ -3454,8 +3692,8 @@ export default function Home() {
     return getViewLabel(view);
   }, [view]);
 
-  // Determine if we should show data or placeholder
-  const showNoData = !storeData.loading && (!storeData.hasData || isAggregateView(view));
+  // Only show NoDataPage if branch has no data (not for aggregate views which now work)
+  const showNoData = !storeData.loading && !storeData.hasData;
 
   if (storeData.loading) {
     return (
