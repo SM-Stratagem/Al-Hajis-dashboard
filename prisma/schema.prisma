@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,20 +10,204 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
+// ═══════════════════════════════════════════════════════════════
+// BRANCH CONFIGURATION
+// ═══════════════════════════════════════════════════════════════
+
+model Branch {
   id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
+  name      String   @default("Parfumix ADCB")
+  location  String   @default("ADCB Mall, Dubai, UAE")
+  currency  String   @default("AED")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-model Post {
+// ═══════════════════════════════════════════════════════════════
+// MONTHLY SALES (from POS daywise reports)
+// ═══════════════════════════════════════════════════════════════
+
+model MonthlySale {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  month     Int      // 1-12
+  year      Int      // e.g. 2025
+  gross     Float
+  returns   Float    @default(0)
+  net       Float
+  cash      Float    @default(0)
+  card      Float    @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  dailySales    DailySale[]
+  staffCosts    StaffCost[]
+  marketingSpends MarketingSpend[]
+  transactions  TransactionSummary[]
+
+  @@unique([month, year])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DAILY SALES (per day revenue)
+// ═══════════════════════════════════════════════════════════════
+
+model DailySale {
+  id        String   @id @default(cuid())
+  date      String   // "YYYY-MM-DD"
+  dayOfWeek Int      // 0=Sun, 1=Mon, ..., 6=Sat
+  revenue   Float
+  month     Int
+  year      Int
+  createdAt DateTime @default(now())
+
+  monthlySaleId String
+  monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
+
+  @@unique([date])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CAPEX ITEMS
+// ═══════════════════════════════════════════════════════════════
+
+model CapexItem {
+  id       String  @id @default(cuid())
+  name     String
+  amount   Float
+  category String  // Lease, Fit-out, Inventory, Tech, Legal, Deposits, People, Other
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OVERHEADS (pre-launch costs)
+// ═══════════════════════════════════════════════════════════════
+
+model Overhead {
+  id     String @id @default(cuid())
+  name   String
+  amount Float
+}
+
+// ═══════════════════════════════════════════════════════════════
+// P&L PERIODS
+// ═══════════════════════════════════════════════════════════════
+
+model PnlPeriod {
+  id           String   @id @default(cuid())
+  period       String   // "Sep 2025 – Dec 2025"
+  revenue      Float
+  cogsGoods    Float    @default(0)
+  cogsAccessories Float  @default(0)
+  totalCogs    Float    @default(0)
+  grossProfit  Float
+  grossMargin  Float
+  totalExpenses Float
+  netProfitLoss Float
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  expenses PnlExpense[]
+}
+
+// ═══════════════════════════════════════════════════════════════
+// P&L EXPENSE LINE ITEMS
+// ═══════════════════════════════════════════════════════════════
+
+model PnlExpense {
+  id         String   @id @default(cuid())
+  name       String
+  amount     Float
+  createdAt  DateTime @default(now())
+
+  pnlPeriodId String
+  pnlPeriod   PnlPeriod @relation(fields: [pnlPeriodId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PRODUCT / SKU SALES
+// ═══════════════════════════════════════════════════════════════
+
+model ProductSale {
+  id          String   @id @default(cuid())
+  name        String
+  sku         String?
+  category    String   // Oud, Floral, Fresh, Oriental, Accessories, etc.
+  unitCost    Float    @default(0)
+  sellingPrice Float   @default(0)
+  quantitySold Int     @default(0)
+  revenue     Float
+  margin      Float?
+  month       Int?
+  year        Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STAFF COSTS (monthly)
+// ═══════════════════════════════════════════════════════════════
+
+model StaffCost {
+  id           String @id @default(cuid())
+  month        Int
+  year         Int
+  salary       Float  @default(0)
+  commission   Float  @default(0)
+  visa         Float  @default(0)
+  accommodation Float @default(0)
+  overtime     Float  @default(0)
+  other        Float  @default(0)
+  total        Float
+
+  monthlySaleId String
+  monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
+
+  @@unique([month, year])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MARKETING SPEND (monthly by channel)
+// ═══════════════════════════════════════════════════════════════
+
+model MarketingSpend {
+  id           String @id @default(cuid())
+  month        Int
+  year         Int
+  channel      String   // Instagram, In-mall, Flyers, Influencers, etc.
+  amount       Float
+  notes        String?
+
+  monthlySaleId String
+  monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TRANSACTION SUMMARY (daily/monthly aggregates)
+// ═══════════════════════════════════════════════════════════════
+
+model TransactionSummary {
+  id            String @id @default(cuid())
+  month         Int
+  year          Int
+  receiptCount  Int    @default(0)
+  totalRevenue  Float
+  avgTicketSize Float?
+
+  monthlySaleId String
+  monthlySale   MonthlySale @relation(fields: [monthlySaleId], references: [id], onDelete: Cascade)
+
+  @@unique([month, year])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UPLOAD HISTORY
+// ═══════════════════════════════════════════════════════════════
+
+model DataUpload {
+  id        String   @id @default(cuid())
+  category  String   // monthly-sales, daily-sales, capex, overheads, pnl, products, staff-costs, marketing, transactions
+  fileName  String
+  rowCount  Int      @default(0)
+  status    String   @default("success") // success, error, partial
+  error     String?
+  createdAt DateTime @default(now())
 }

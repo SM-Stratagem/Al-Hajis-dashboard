@@ -11,7 +11,7 @@ import {
   CalendarDays, RotateCcw, CreditCard, BarChart3, Database, ChevronRight,
   Activity, Target, Zap, Eye, Clock, ShoppingCart, ArrowUpRight, ArrowDownRight,
   CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt,
-  Store, Calculator, ClipboardList, ArrowRight,
+  Store, Calculator, ClipboardList, ArrowRight, Upload, FileSpreadsheet, RefreshCw, Download,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════
@@ -176,7 +176,7 @@ function ChartCard({ title, children, wide }: { title?: string; children: React.
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
 // ══════════════════════════════════════════════════════════════════
-type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps';
+type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps' | 'data-center';
 
 const navSections = [
   {
@@ -216,6 +216,12 @@ const navSections = [
       { id: 'forecast' as PageId, label: 'Forecast', icon: BarChart3 },
       { id: 'simulator' as PageId, label: 'What-If', icon: Zap },
       { id: 'gaps' as PageId, label: 'Data Gaps', icon: Database },
+    ],
+  },
+  {
+    title: 'System',
+    items: [
+      { id: 'data-center' as PageId, label: 'Data Center', icon: Upload, badge: 'NEW' },
     ],
   },
 ];
