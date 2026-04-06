@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import {
   SEED_MONTHLY_SALES, SEED_DAILY_SALES, SEED_CAPEX,
-  SEED_OVERHEADS, SEED_PNL,
+  SEED_OVERHEADS, SEED_PNL, SEED_PRODUCTS, SEED_STAFF_COSTS,
+  SEED_MARKETING, SEED_TRANSACTIONS,
 } from '@/lib/seed-data';
 import { DEFAULT_BRANCH_SLUG, BRANCHES, getBranchBySlug } from '@/lib/branches';
 
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
           '17 CAPEX items',
           '4 overhead items',
           '1 P&L period with 27 expense lines',
+          '66 product/SKU records across 5 categories',
+          '6 months staff costs',
+          '17 marketing spend records',
+          '6 months transaction summaries',
         ],
       });
     }
@@ -114,6 +119,41 @@ export async function POST(req: NextRequest) {
     });
     results.pnlPeriods = 1;
     results.pnlExpenses = await db.pnlExpense.count({ where: { pnlPeriodId: pnl.id } });
+
+    // ── Products ──
+    for (const p of SEED_PRODUCTS) {
+      await db.productSale.create({ data: { ...p, branchId: branch.id } });
+    }
+    results.products = await db.productSale.count({ where: { branchId: branch.id } });
+
+    // ── Staff Costs ──
+    for (const sc of SEED_STAFF_COSTS) {
+      const ms = await db.monthlySale.findFirst({ where: { month: sc.month, year: sc.year, branchId: branch.id } });
+      const total = sc.salary + sc.commission + sc.visa + sc.accommodation + sc.overtime + sc.other;
+      await db.staffCost.create({
+        data: { ...sc, total, monthlySaleId: ms?.id || '' },
+      });
+    }
+    results.staffCosts = await db.staffCost.count({ where: { monthlySale: { branchId: branch.id } } });
+
+    // ── Marketing Spend ──
+    for (const m of SEED_MARKETING) {
+      const ms = await db.monthlySale.findFirst({ where: { month: m.month, year: m.year, branchId: branch.id } });
+      await db.marketingSpend.create({
+        data: { ...m, monthlySaleId: ms?.id || '' },
+      });
+    }
+    results.marketing = await db.marketingSpend.count({ where: { monthlySale: { branchId: branch.id } } });
+
+    // ── Transaction Summaries ──
+    for (const t of SEED_TRANSACTIONS) {
+      const ms = await db.monthlySale.findFirst({ where: { month: t.month, year: t.year, branchId: branch.id } });
+      const avgTicketSize = t.receiptCount > 0 ? t.totalRevenue / t.receiptCount : null;
+      await db.transactionSummary.create({
+        data: { month: t.month, year: t.year, receiptCount: t.receiptCount, totalRevenue: t.totalRevenue, avgTicketSize, monthlySaleId: ms?.id || '' },
+      });
+    }
+    results.transactions = await db.transactionSummary.count({ where: { monthlySale: { branchId: branch.id } } });
 
     // ── Log upload ──
     await db.dataUpload.create({

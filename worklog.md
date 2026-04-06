@@ -50,3 +50,32 @@ Stage Summary:
 - Data Center blocks data operations in aggregate view with clear warning
 - Seed route correctly creates branches with proper metadata from BRANCHES array
 - Currently only ADCB branch has data; other branches can be seeded via Data Center
+
+---
+Task ID: 3
+Agent: main
+Task: Add Product Analytics, Staff Productivity, and Marketing ROI sections
+
+Work Log:
+- Added SEED_PRODUCTS (66 records across 11 SKUs in 5 categories: Oud, Floral, Oriental, Fresh, Accessories) for 6 months
+- Added SEED_STAFF_COSTS (6 monthly records with salary, commission, visa, accommodation, overtime breakdown)
+- Added SEED_MARKETING (17 records across 4 channels: Instagram, In-Mall, Influencer, Samples) for 6 months
+- Added SEED_TRANSACTIONS (6 monthly records with receipt counts and revenue for ticket size calculation)
+- Updated seed API route to create Products, StaffCosts, MarketingSpends, TransactionSummaries
+- Added 3 new page sections to page.tsx:
+  - ProductsPage: revenue by category pie chart, top 8 products list, stacked bar chart for monthly category revenue, KPIs (total revenue, units, avg margin, top product)
+  - StaffPage: cost breakdown pie, monthly staff cost stacked bar, revenue per staff hour line, detail table with all cost components
+  - MarketingPage: channel spend pie chart, channel breakdown with progress bars, composed chart (revenue bar + marketing spend line), KPIs (ROI, CAC, spend/revenue ratio)
+- Added "Analytics" section to sidebar navigation between Operations and Strategy
+- Added Megaphone icon import, updated PageId type and pageComponents record
+- Reseeded ADCB branch: 66 products, 6 staff costs, 17 marketing records, 6 transaction summaries
+- All API endpoints verified returning data (200 status)
+- Lint passes cleanly
+
+Stage Summary:
+- 3 new dashboard sections live: Product Analytics, Staff Productivity, Marketing ROI
+- Full seed data for all 3 sections (ADCB branch, Oct 2025 - Mar 2026)
+- Analytics nav group added to sidebar with 3 entries
+- Total dashboard sections: 18 (was 15)
+- Each section independently fetches its own data from the API
+- Graceful empty states shown when no data is available

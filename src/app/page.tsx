@@ -12,6 +12,7 @@ import {
   Activity, Target, Zap, Eye, Clock, ShoppingCart, ArrowUpRight, ArrowDownRight,
   CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt,
   Store, Calculator, ClipboardList, ArrowRight, Upload, FileSpreadsheet, RefreshCw, Download,
+  Megaphone,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════
@@ -553,7 +554,7 @@ function ChartCard({ title, children, wide }: { title?: string; children: React.
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
 // ══════════════════════════════════════════════════════════════════
-type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps' | 'data-center';
+type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'data-center';
 
 const navSections = [
   {
@@ -585,6 +586,14 @@ const navSections = [
     items: [
       { id: 'returns' as PageId, label: 'Returns', icon: RotateCcw },
       { id: 'payments' as PageId, label: 'Payment Mix', icon: CreditCard },
+    ],
+  },
+  {
+    title: 'Analytics',
+    items: [
+      { id: 'products' as PageId, label: 'Product Analytics', icon: Package },
+      { id: 'staff' as PageId, label: 'Staff Productivity', icon: Users },
+      { id: 'marketing' as PageId, label: 'Marketing ROI', icon: Megaphone },
     ],
   },
   {
@@ -3652,6 +3661,433 @@ function GapsPage({ data }: { data: StoreData }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// PAGE: PRODUCT ANALYTICS
+// ══════════════════════════════════════════════════════════════════
+function ProductsPage({ data }: { data: StoreData }) {
+  const { currency: cur } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+  const [products, setProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        let slug = DEFAULT_BRANCH_SLUG;
+        try { const v = JSON.parse(localStorage.getItem('parfumix:selectedView') || '{}'); if (v.type === 'branch' && v.slug) slug = v.slug; } catch {}
+        const qs = slug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(slug)}` : '';
+        const res = await fetch(`/api/data/products${qs}`).then(r => r.json()).catch(() => []);
+        setProducts(res || []);
+      } finally { setLoading(false); }
+    }
+    load();
+  }, []);
+
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
+  if (products.length === 0) return (
+    <div style={{ textAlign: 'center', padding: 60 }}>
+      <Package size={32} style={{ color: T3, marginBottom: 12 }} />
+      <div style={{ fontSize: 13, color: T2 }}>No product data loaded yet</div>
+      <div style={{ fontSize: 10, color: T3, marginTop: 6 }}>Upload product data via Data Center or reseed the branch</div>
+    </div>
+  );
+
+  // Aggregate by product name (total across all months)
+  const productTotals = products.reduce((acc: Record<string, any>, p: any) => {
+    if (!acc[p.name]) acc[p.name] = { name: p.name, sku: p.sku, category: p.category, revenue: 0, quantitySold: 0, unitCost: p.unitCost, sellingPrice: p.sellingPrice, margin: p.margin };
+    acc[p.name].revenue += p.revenue || 0;
+    acc[p.name].quantitySold += p.quantitySold || 0;
+    return acc;
+  }, {});
+  const topProducts = Object.values(productTotals).sort((a: any, b: any) => b.revenue - a.revenue);
+
+  // Category totals
+  const catTotals = products.reduce((acc: Record<string, any>, p: any) => {
+    if (!acc[p.category]) acc[p.category] = { name: p.category, revenue: 0, quantity: 0 };
+    acc[p.category].revenue += p.revenue || 0;
+    acc[p.category].quantity += p.quantitySold || 0;
+    return acc;
+  }, {});
+  const categoryData = Object.values(catTotals).sort((a: any, b: any) => b.revenue - a.revenue);
+  const totalRevenue = categoryData.reduce((s: number, c: any) => s + c.revenue, 0);
+  const totalQty = categoryData.reduce((s: number, c: any) => s + c.quantity, 0);
+  const avgMargin = products.length > 0 ? products.reduce((s: number, p: any) => s + (p.margin || 0), 0) / products.length : 0;
+
+  const catColorsArr = [GOLD, STEEL, SAGE, AMBER, ROSE, '#7a6fbf', '#bf5f8c'];
+
+  // Monthly revenue by category
+  const monthlyByCategory = (() => {
+    const months = [...new Set(products.map((p: any) => `${p.month}-${p.year}`))].sort();
+    const cats = [...new Set(products.map((p: any) => p.category))];
+    return months.map(mk => {
+      const [mo, yr] = mk.split('-');
+      const entry: any = { month: `${MN[parseInt(mo) - 1]} ${yr}` };
+      cats.forEach(cat => {
+        const matching = products.filter((p: any) => `${p.month}-${p.year}` === mk && p.category === cat);
+        entry[cat] = matching.reduce((s: number, p: any) => s + (p.revenue || 0), 0);
+      });
+      return entry;
+    });
+  })();
+
+  return (
+    <div>
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Total Product Revenue" value={m(totalRevenue)} sub={`${topProducts.length} unique products`} badge={`${categoryData.length} categories`} badgeColor={GOLD} />
+        <KpiCard label="Total Units Sold" value={totalQty.toLocaleString()} sub={`avg ${m(topProducts.length > 0 ? totalRevenue / topProducts.length : 0)} / product`} />
+        <KpiCard label="Avg Gross Margin" value={pct(avgMargin)} sub="Across all SKUs" badge={avgMargin > 65 ? 'Healthy' : 'Low'} badgeColor={avgMargin > 65 ? SAGE : ROSE} />
+        <KpiCard label="Top Product" value={topProducts[0]?.name?.split(' ').slice(0, 2).join(' ') || '—'} sub={topProducts[0] ? m(topProducts[0].revenue) : ''} badge="Best Seller" badgeColor={SAGE} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <ChartCard title="Revenue by Category">
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie data={categoryData} cx="50%" cy="50%" outerRadius={100} innerRadius={55} dataKey="revenue" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: T3, strokeWidth: 1 }}>
+                {categoryData.map((_: any, i: number) => <Cell key={i} fill={catColorsArr[i % catColorsArr.length]} />)}
+              </Pie>
+              <Tooltip content={<AEDTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Top 8 Products by Revenue">
+          <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+            {topProducts.slice(0, 8).map((p: any, i: number) => (
+              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${BORDER}` }}>
+                <span style={{ width: 20, fontSize: 10, color: T3, textAlign: 'center' }}>{i + 1}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: T1 }}>{p.name}</div>
+                  <div style={{ fontSize: 9, color: T3 }}>{p.category} &middot; {p.quantitySold} units</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, color: T1, fontFamily: 'Georgia, serif' }}>{m(p.revenue)}</div>
+                  <div style={{ fontSize: 9, color: T3 }}>{pct(p.margin)} margin</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ChartCard>
+      </div>
+
+      <ChartCard title="Monthly Revenue by Category" wide>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={monthlyByCategory} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="month" tick={axisTick} />
+            <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
+            <Tooltip content={<AEDTooltip />} />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: T2 }} />
+            {[...new Set(products.map((p: any) => p.category))].map((cat: string, i: number) => (
+              <Bar key={cat} dataKey={cat} stackId="a" fill={catColorsArr[i % catColorsArr.length]} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE: STAFF PRODUCTIVITY
+// ══════════════════════════════════════════════════════════════════
+function StaffPage({ data }: { data: StoreData }) {
+  const { currency: cur } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+  const [staff, setStaff] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        let slug = DEFAULT_BRANCH_SLUG;
+        try { const v = JSON.parse(localStorage.getItem('parfumix:selectedView') || '{}'); if (v.type === 'branch' && v.slug) slug = v.slug; } catch {}
+        const qs = slug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(slug)}` : '';
+        const [scRes, txRes] = await Promise.all([
+          fetch(`/api/data/staff-costs${qs}`).then(r => r.json()).catch(() => []),
+          fetch(`/api/data/transactions${qs}`).then(r => r.json()).catch(() => []),
+        ]);
+        setStaff(scRes || []);
+        setTransactions(txRes || []);
+      } finally { setLoading(false); }
+    }
+    load();
+  }, []);
+
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
+  if (staff.length === 0) return (
+    <div style={{ textAlign: 'center', padding: 60 }}>
+      <Users size={32} style={{ color: T3, marginBottom: 12 }} />
+      <div style={{ fontSize: 13, color: T2 }}>No staff data loaded yet</div>
+      <div style={{ fontSize: 10, color: T3, marginTop: 6 }}>Upload staff cost data via Data Center or reseed the branch</div>
+    </div>
+  );
+
+  const totalSalary = staff.reduce((s: any, c: any) => s + (c.salary || 0), 0);
+  const totalCommission = staff.reduce((s: any, c: any) => s + (c.commission || 0), 0);
+  const totalVisa = staff.reduce((s: any, c: any) => s + (c.visa || 0), 0);
+  const totalAccom = staff.reduce((s: any, c: any) => s + (c.accommodation || 0), 0);
+  const totalOT = staff.reduce((s: any, c: any) => s + (c.overtime || 0), 0);
+  const totalOther = staff.reduce((s: any, c: any) => s + (c.other || 0), 0);
+  const totalStaffCost = totalSalary + totalCommission + totalVisa + totalAccom + totalOT + totalOther;
+  const avgTotal = totalStaffCost / staff.length;
+
+  // Cost breakdown for pie
+  const costBreakdown = [
+    { name: 'Salary', value: totalSalary },
+    { name: 'Commission', value: totalCommission },
+    { name: 'Visa', value: totalVisa },
+    { name: 'Accommodation', value: totalAccom },
+    { name: 'Overtime', value: totalOT },
+    { name: 'Other', value: totalOther },
+  ].filter(d => d.value > 0);
+
+  const costColors = [GOLD, SAGE, STEEL, AMBER, ROSE, T3];
+
+  // Monthly trend
+  const monthlyStaff = staff.map((s: any) => ({
+    month: `${MN[s.month - 1]} ${String(s.year).slice(2)}`,
+    salary: s.salary,
+    commission: s.commission,
+    overtime: s.overtime,
+    total: s.total || s.salary + s.commission + s.visa + s.accommodation + s.overtime + s.other,
+    otRatio: s.total > 0 ? (s.overtime / s.total) * 100 : 0,
+  }));
+
+  // Merge with transactions for revenue per staff hour
+  const monthlyWithTx = monthlyStaff.map((ms: any) => {
+    const tx = transactions.find((t: any) => {
+      const [mo, yr] = ms.month.split(' ');
+      const monthNum = MN.indexOf(mo) + 1;
+      const year = parseInt('20' + yr);
+      return t.month === monthNum && t.year === year;
+    });
+    const revenue = tx?.totalRevenue || 0;
+    const receipts = tx?.receiptCount || 0;
+    const avgTicket = tx?.avgTicketSize || 0;
+    const staffHours = 2 * 26 * 9; // 2 staff, 26 working days, 9 hours each
+    return { ...ms, revenue, receipts, avgTicket, revPerStaffHour: staffHours > 0 ? revenue / staffHours : 0, staffHours };
+  });
+
+  const totalRevenue = monthlyWithTx.reduce((s: any, m: any) => s + m.revenue, 0);
+  const totalReceipts = monthlyWithTx.reduce((s: any, m: any) => s + m.receipts, 0);
+  const avgRevPerHour = monthlyWithTx.reduce((s: any, m: any) => s + m.revPerStaffHour, 0) / monthlyWithTx.length;
+  const commToRevenue = totalRevenue > 0 ? (totalCommission / totalRevenue) * 100 : 0;
+
+  return (
+    <div>
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Total Staff Cost" value={m(totalStaffCost)} sub={`${staff.length} months tracked`} badge={`avg ${m(avgTotal)}/mo`} badgeColor={GOLD} />
+        <KpiCard label="Revenue / Staff Hour" value={m(Math.round(avgRevPerHour))} sub="2 staff × 9hrs × 26 days" badge="Productivity" badgeColor={SAGE} />
+        <KpiCard label="Commission Ratio" value={pct(commToRevenue)} sub={`${m(totalCommission)} of ${m(totalRevenue)}`} badge={commToRevenue < 5 ? 'Efficient' : 'High'} badgeColor={commToRevenue < 5 ? SAGE : AMBER} />
+        <KpiCard label="Avg Ticket Size" value={totalReceipts > 0 ? m(Math.round(totalRevenue / totalReceipts)) : '—'} sub={`${totalReceipts.toLocaleString()} total receipts`} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <ChartCard title="Staff Cost Breakdown">
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie data={costBreakdown} cx="50%" cy="50%" outerRadius={80} innerRadius={40} dataKey="value" stroke="none">
+                {costBreakdown.map((_: any, i: number) => <Cell key={i} fill={costColors[i % costColors.length]} />)}
+              </Pie>
+              <Tooltip content={<AEDTooltip />} />
+              <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: T2 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Monthly Staff Costs">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={monthlyStaff} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" tick={axisTick} fontSize={8} />
+              <YAxis tick={axisTick} tickFormatter={v => mK(v)} fontSize={8} />
+              <Tooltip content={<AEDTooltip />} />
+              <Bar dataKey="salary" name="Salary" fill={GOLD} stackId="a" />
+              <Bar dataKey="commission" name="Commission" fill={SAGE} stackId="a" />
+              <Bar dataKey="overtime" name="Overtime" fill={ROSE} stackId="a" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Revenue Per Staff Hour Trend">
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={monthlyWithTx} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" tick={axisTick} fontSize={8} />
+              <YAxis tick={axisTick} tickFormatter={v => mK(v)} fontSize={8} />
+              <Tooltip content={<AEDTooltip />} />
+              <Line type="monotone" dataKey="revPerStaffHour" name="Rev/Staff Hr" stroke={SAGE} strokeWidth={2} dot={{ r: 3, fill: SAGE }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      <ChartCard title="Monthly Staff Details">
+        <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                {['Month', 'Salary', 'Commission', 'Visa', 'Accom.', 'Overtime', 'Total', 'Revenue', 'Rev/Staff Hr'].map(h => (
+                  <th key={h} style={{ padding: '8px 6px', textAlign: 'right', color: T3, fontWeight: 500, textTransform: 'uppercase', fontSize: 8, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {monthlyWithTx.map((row: any, i: number) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                  <td style={{ padding: '6px', color: T1 }}>{row.month}</td>
+                  {['salary', 'commission', 'visa', 'accommodation', 'overtime', 'total', 'revenue'].map(k => (
+                    <td key={k} style={{ padding: '6px', textAlign: 'right', color: T2, fontFamily: 'Georgia, serif', fontSize: 10 }}>{m(row[k] || 0)}</td>
+                  ))}
+                  <td style={{ padding: '6px', textAlign: 'right', color: SAGE, fontFamily: 'Georgia, serif', fontSize: 10, fontWeight: 600 }}>{m(Math.round(row.revPerStaffHour))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </ChartCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE: MARKETING ROI
+// ══════════════════════════════════════════════════════════════════
+function MarketingPage({ data }: { data: StoreData }) {
+  const { currency: cur } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+  const [marketing, setMarketing] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        let slug = DEFAULT_BRANCH_SLUG;
+        try { const v = JSON.parse(localStorage.getItem('parfumix:selectedView') || '{}'); if (v.type === 'branch' && v.slug) slug = v.slug; } catch {}
+        const qs = slug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(slug)}` : '';
+        const [mkRes, txRes] = await Promise.all([
+          fetch(`/api/data/marketing${qs}`).then(r => r.json()).catch(() => []),
+          fetch(`/api/data/transactions${qs}`).then(r => r.json()).catch(() => []),
+        ]);
+        setMarketing(mkRes || []);
+        setTransactions(txRes || []);
+      } finally { setLoading(false); }
+    }
+    load();
+  }, []);
+
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
+  if (marketing.length === 0) return (
+    <div style={{ textAlign: 'center', padding: 60 }}>
+      <Megaphone size={32} style={{ color: T3, marginBottom: 12 }} />
+      <div style={{ fontSize: 13, color: T2 }}>No marketing data loaded yet</div>
+      <div style={{ fontSize: 10, color: T3, marginTop: 6 }}>Upload marketing spend data via Data Center or reseed the branch</div>
+    </div>
+  );
+
+  const totalSpend = marketing.reduce((s: any, m: any) => s + (m.amount || 0), 0);
+  const totalRevenue = transactions.reduce((s: any, t: any) => s + (t.totalRevenue || 0), 0);
+  const totalReceipts = transactions.reduce((s: any, t: any) => s + (t.receiptCount || 0), 0);
+  const marketingROI = totalSpend > 0 ? ((totalRevenue - totalSpend) / totalSpend) * 100 : 0;
+  const cac = totalReceipts > 0 ? totalSpend / totalReceipts : 0;
+  const marketingToRevenue = totalRevenue > 0 ? (totalSpend / totalRevenue) * 100 : 0;
+
+  // Channel totals
+  const channelTotals = marketing.reduce((acc: Record<string, any>, mk: any) => {
+    if (!acc[mk.channel]) acc[mk.channel] = { name: mk.channel, amount: 0, count: 0 };
+    acc[mk.channel].amount += mk.amount || 0;
+    acc[mk.channel].count += 1;
+    return acc;
+  }, {});
+  const channelData = Object.values(channelTotals).sort((a: any, b: any) => b.amount - a.amount);
+  const channelColors = [GOLD, STEEL, SAGE, AMBER, ROSE];
+
+  // Monthly spend by channel
+  const months = [...new Set(marketing.map((mk: any) => `${mk.month}-${mk.year}`))].sort();
+  const channels = [...new Set(marketing.map((mk: any) => mk.channel))];
+  const monthlyMarketing = months.map(mk => {
+    const [mo, yr] = mk.split('-');
+    const entry: any = { month: `${MN[parseInt(mo) - 1]} ${yr}` };
+    channels.forEach(ch => {
+      entry[ch] = marketing.filter((m: any) => `${m.month}-${m.year}` === mk && m.channel === ch).reduce((s: number, m: any) => s + (m.amount || 0), 0);
+    });
+    const tx = transactions.find((t: any) => t.month === parseInt(mo) && t.year === parseInt(yr));
+    entry.revenue = tx?.totalRevenue || 0;
+    entry.spend = Object.entries(entry).filter(([k]) => k !== 'month' && k !== 'revenue' && k !== 'spend').reduce((s: number, [_, v]: any) => s + v, 0);
+    return entry;
+  });
+
+  const avgMonthlySpend = months.length > 0 ? totalSpend / months.length : 0;
+
+  return (
+    <div>
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Total Marketing Spend" value={m(totalSpend)} sub={`${marketing.length} campaigns across ${months.length} months`} />
+        <KpiCard label="Marketing ROI" value={`${marketingROI.toFixed(1)}x`} sub={`${m(totalRevenue)} revenue on ${m(totalSpend)} spend`} badge={marketingROI > 20 ? 'Strong' : marketingROI > 0 ? 'Positive' : 'Negative'} badgeColor={marketingROI > 20 ? SAGE : marketingROI > 0 ? AMBER : ROSE} />
+        <KpiCard label="Customer Acq. Cost" value={m(Math.round(cac))} sub={`${totalReceipts} total customers`} badge={cac < 30 ? 'Low CAC' : cac < 60 ? 'Moderate' : 'High CAC'} badgeColor={cac < 30 ? SAGE : cac < 60 ? AMBER : ROSE} />
+        <KpiCard label="Spend / Revenue" value={pct(marketingToRevenue)} sub={`avg ${m(Math.round(avgMonthlySpend))}/month`} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <ChartCard title="Spend by Channel">
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie data={channelData} cx="50%" cy="50%" outerRadius={95} innerRadius={50} dataKey="amount" stroke="none" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: T3, strokeWidth: 1 }}>
+                {channelData.map((_: any, i: number) => <Cell key={i} fill={channelColors[i % channelColors.length]} />)}
+              </Pie>
+              <Tooltip content={<AEDTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Channel Breakdown">
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {channelData.map((ch: any, i: number) => {
+              const pctOfTotal = totalSpend > 0 ? (ch.amount / totalSpend) * 100 : 0;
+              return (
+                <div key={ch.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: `1px solid ${BORDER}` }}>
+                  <div style={{ width: 4, height: 28, borderRadius: 2, background: channelColors[i % channelColors.length], flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, color: T1 }}>{ch.name}</span>
+                      <span style={{ fontSize: 11, color: T1, fontFamily: 'Georgia, serif' }}>{m(ch.amount)}</span>
+                    </div>
+                    <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)' }}>
+                      <div style={{ width: `${pctOfTotal}%`, height: '100%', borderRadius: 2, background: channelColors[i % channelColors.length] }} />
+                    </div>
+                    <div style={{ fontSize: 9, color: T3, marginTop: 3 }}>{pctOfTotal.toFixed(0)}% of total &middot; {ch.count} campaign{ch.count !== 1 ? 's' : ''}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </ChartCard>
+      </div>
+
+      <ChartCard title="Monthly Marketing Spend vs Revenue" wide>
+        <ResponsiveContainer width="100%" height={280}>
+          <ComposedChart data={monthlyMarketing} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="month" tick={axisTick} />
+            <YAxis yAxisId="left" tick={axisTick} tickFormatter={v => mK(v)} />
+            <YAxis yAxisId="right" orientation="right" tick={axisTick} tickFormatter={v => mK(v)} />
+            <Tooltip content={<AEDTooltip />} />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: T2 }} />
+            <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill={SAGE} radius={[4, 4, 0, 0]} barSize={24} opacity={0.7} />
+            <Line yAxisId="right" type="monotone" dataKey="spend" name="Marketing Spend" stroke={ROSE} strokeWidth={2} dot={{ r: 4, fill: ROSE }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </ChartCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // MAIN PAGE COMPONENT
 // ══════════════════════════════════════════════════════════════════
 const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
@@ -3669,6 +4105,9 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   forecast: (props) => <ForecastPage {...props} />,
   simulator: (props) => <SimulatorPage {...props} />,
   gaps: (props) => <GapsPage {...props} />,
+  products: (props) => <ProductsPage {...props} />,
+  staff: (props) => <StaffPage {...props} />,
+  marketing: (props) => <MarketingPage {...props} />,
   'data-center': (props) => <DataCenterPage {...props} />,
 };
 
