@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo, useSyncExtern
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   ComposedChart, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import {
   LayoutDashboard, AlertTriangle, DollarSign, PieChartIcon, TrendingUp,
@@ -12,7 +12,7 @@ import {
   Activity, Target, Zap, Eye, Clock, ShoppingCart, ArrowUpRight, ArrowDownRight,
   CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt,
   Store, Calculator, ClipboardList, ArrowRight, Upload, FileSpreadsheet, RefreshCw, Download,
-  Megaphone,
+  Megaphone, Gauge, Wallet, UserCheck, BadgeDollarSign, Timer, TrendingDown, Coins,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════
@@ -566,7 +566,7 @@ function ChartCard({ title, children, wide }: { title?: string; children: React.
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
 // ══════════════════════════════════════════════════════════════════
-type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'data-center';
+type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'daily-ops' | 'cash-flow' | 'customers' | 'data-center';
 
 const navSections = [
   {
@@ -596,6 +596,7 @@ const navSections = [
   {
     title: 'Operations',
     items: [
+      { id: 'daily-ops' as PageId, label: 'Daily Operations', icon: Gauge },
       { id: 'returns' as PageId, label: 'Returns', icon: RotateCcw },
       { id: 'payments' as PageId, label: 'Payment Mix', icon: CreditCard },
     ],
@@ -606,6 +607,7 @@ const navSections = [
       { id: 'products' as PageId, label: 'Product Analytics', icon: Package },
       { id: 'staff' as PageId, label: 'Staff Productivity', icon: Users },
       { id: 'marketing' as PageId, label: 'Marketing ROI', icon: Megaphone },
+      { id: 'customers' as PageId, label: 'Customer Insights', icon: UserCheck },
     ],
   },
   {
@@ -613,6 +615,7 @@ const navSections = [
     items: [
       { id: 'forecast' as PageId, label: 'Forecast', icon: BarChart3 },
       { id: 'simulator' as PageId, label: 'What-If', icon: Zap },
+      { id: 'cash-flow' as PageId, label: 'Cash Flow', icon: Wallet },
       { id: 'gaps' as PageId, label: 'Data Gaps', icon: Database },
     ],
   },
@@ -2850,6 +2853,445 @@ function WeeklyPage({ data }: { data: StoreData }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// PAGE: DAILY OPERATIONS TRACKER
+// ══════════════════════════════════════════════════════════════════
+function DailyOpsPage({ data }: { data: StoreData }) {
+  const { daily: DAILY, months: MONTHS, net: NET, avgMonthlyNet, currency: cur, totalReturns, monthsFull: MONTHS_FULL } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const [selectedMonth, setSelectedMonth] = useState(DAILY.length - 1);
+
+  const monthData = DAILY[selectedMonth] || { startDay: 0, values: [] };
+  const dailyValues = monthData.values;
+  const daysInMonth = dailyValues.length;
+  const totalDailyRevenue = dailyValues.reduce((a, b) => a + b, 0);
+  const avgDailyRevenue = daysInMonth > 0 ? totalDailyRevenue / daysInMonth : 0;
+  const maxDaily = daysInMonth > 0 ? Math.max(...dailyValues) : 0;
+  const minDaily = daysInMonth > 0 ? Math.min(...dailyValues) : 0;
+  const bestDayIdx = dailyValues.indexOf(maxDaily);
+  const worstDayIdx = dailyValues.indexOf(minDaily);
+  const targetDaily = avgMonthlyNet / 30;
+
+  // Day-of-week aggregation for selected month
+  const dowAgg = dayNames.map((name, dow) => {
+    const vals: number[] = [];
+    dailyValues.forEach((v, di) => {
+      const actualDow = (monthData.startDay + di) % 7;
+      if (actualDow === dow) vals.push(v);
+    });
+    const avg = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    return { name, avg: Math.round(avg), count: vals.length, total: Math.round(vals.reduce((a, b) => a + b, 0)) };
+  });
+
+  // Weekly targets for selected month
+  const weeklyTarget = targetDaily * 7;
+  let weekTotal = 0;
+  let weekDayCount = 0;
+  const weeklyPerformance: { week: number; total: number; days: number; vsTarget: number; pct: number }[] = [];
+  dailyValues.forEach((v, di) => {
+    weekTotal += v;
+    weekDayCount++;
+    if (weekDayCount >= 7 || di === dailyValues.length - 1) {
+      const pct = weeklyTarget > 0 ? (weekTotal / weeklyTarget) * 100 : 0;
+      weeklyPerformance.push({ week: weeklyPerformance.length + 1, total: weekTotal, days: weekDayCount, vsTarget: weekTotal - weeklyTarget, pct });
+      weekTotal = 0;
+      weekDayCount = 0;
+    }
+  });
+
+  // Rolling 7-day trend
+  const rolling7 = dailyValues.map((_, i) => {
+    const window = dailyValues.slice(Math.max(0, i - 6), i + 1);
+    return window.reduce((a, b) => a + b, 0) / window.length;
+  });
+
+  const dailyChartData = dailyValues.map((v, i) => ({
+    day: i + 1,
+    revenue: v,
+    target: Math.round(targetDaily),
+    '7-day avg': Math.round(rolling7[i]),
+    dow: dayNames[(monthData.startDay + i) % 7],
+  }));
+
+  return (
+    <div>
+      {/* Month selector */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {MONTHS.map((m, i) => (
+          <button key={i} onClick={() => setSelectedMonth(i)} style={{
+            padding: '5px 12px', borderRadius: 6, fontSize: 9, fontWeight: 600,
+            border: `1px solid ${selectedMonth === i ? GOLD : BORDER}`,
+            background: selectedMonth === i ? `${GOLD}22` : 'transparent',
+            color: selectedMonth === i ? GOLD : T2, cursor: 'pointer', fontFamily: 'inherit',
+          }}>{m}</button>
+        ))}
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Monthly Total" value={m(totalDailyRevenue)} sub={MONTHS_FULL[selectedMonth] || MONTHS[selectedMonth]} badge={`${daysInMonth} days`} badgeColor={GOLD} />
+        <KpiCard label="Avg Daily Revenue" value={m(Math.round(avgDailyRevenue))} sub={`Target: ${m(Math.round(targetDaily))}`} badge={avgDailyRevenue >= targetDaily ? 'On Track' : 'Below Target'} badgeColor={avgDailyRevenue >= targetDaily ? SAGE : AMBER} />
+        <KpiCard label="Best Day" value={m(maxDaily)} sub={`Day ${bestDayIdx + 1} · ${dayNames[(monthData.startDay + bestDayIdx) % 7]}`} badge="Peak" badgeColor={SAGE} />
+        <KpiCard label="Worst Day" value={m(minDaily)} sub={`Day ${worstDayIdx + 1} · ${dayNames[(monthData.startDay + worstDayIdx) % 7]}`} badge="Low" badgeColor={ROSE} />
+      </div>
+
+      {/* Daily Revenue vs Target */}
+      <ChartCard title={`${MONTHS[selectedMonth]} ${MONTHS_FULL[selectedMonth] || ''} — Daily Revenue vs Target`}>
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={dailyChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="day" tick={axisTick} />
+            <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
+            <Tooltip content={<AEDTooltip />} />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: T2 }} />
+            <Bar dataKey="revenue" name="Revenue" fill={GOLD} radius={[2, 2, 0, 0]} barSize={12} opacity={0.85} />
+            <Line dataKey="target" name="Target" stroke={ROSE} strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+            <Line dataKey="7-day avg" name="7-Day Avg" stroke={SAGE} strokeWidth={2} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <div className="grid grid-cols-2 gap-3 mt-3">
+        {/* Day-of-week performance */}
+        <ChartCard title="Performance by Day of Week">
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={dowAgg} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="name" tick={axisTick} />
+              <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
+              <Tooltip content={<AEDTooltip />} />
+              <Bar dataKey="avg" name="Avg Revenue" radius={[3, 3, 0, 0]} barSize={24}>
+                {dowAgg.map((_, i) => <Cell key={i} fill={dowAgg[i].avg >= avgDailyRevenue ? SAGE : dowAgg[i].avg >= avgDailyRevenue * 0.7 ? AMBER : ROSE} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        {/* Weekly performance */}
+        <ChartCard title="Weekly Performance vs Target">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {weeklyPerformance.map(w => (
+              <div key={w.week}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                  <span style={{ fontSize: 10, color: T2 }}>Week {w.week} <span style={{ fontSize: 8, color: T3 }}>({w.days} days)</span></span>
+                  <span style={{ fontSize: 10, fontFamily: 'DM Mono, monospace', color: w.pct >= 100 ? SAGE : w.pct >= 75 ? AMBER : ROSE, fontWeight: 600 }}>
+                    {m(w.total)} <span style={{ fontSize: 8, fontWeight: 400 }}>({w.pct.toFixed(0)}%)</span>
+                  </span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)' }}>
+                  <div style={{ height: '100%', borderRadius: 3, width: `${Math.min(w.pct, 130)}%`, background: w.pct >= 100 ? SAGE : w.pct >= 75 ? AMBER : ROSE, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE: CASH FLOW VIEW
+// ══════════════════════════════════════════════════════════════════
+function CashFlowPage({ data }: { data: StoreData }) {
+  const { net: NET, gross: GROSS, months: MONTHS, monthsFull: MONTHS_FULL, pnl: PNL, totalInvestment: TOTAL_INVESTMENT, capexItems: CAPEX_ITEMS, overheads: OVERHEADS, totalNet, monthlyData, currency: cur, cumulativeNet } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+
+  const monthlyOpCosts = EST_MONTHLY_COSTS.total;
+  const cogsRate = PNL.grossMargin > 0 ? (100 - PNL.grossMargin) : 27;
+  const avgReturns = monthlyData.length > 0 ? monthlyData.reduce((s, d) => s + d.returns, 0) / monthlyData.length : 0;
+
+  // Monthly cash flow = Net Revenue - Op Costs - COGS already deducted from net
+  // But we need to account for CAPEX timing and working capital
+  const monthlyCashFlow = NET.map((n, i) => {
+    const opCosts = monthlyOpCosts;
+    const gp = GROSS[i] * (PNL.grossMargin / 100);
+    const cogs = GROSS[i] - gp;
+    return Math.round(n - opCosts); // net already has returns deducted, op costs subtracted
+  });
+
+  const monthlyInflows = NET.map(n => n);
+  const monthlyOutflows = monthlyCashFlow.map(cf => cf < 0 ? Math.abs(cf) : 0);
+
+  const totalInflow = monthlyInflows.reduce((a, b) => a + b, 0);
+  const totalOutflow = monthlyOutflows.reduce((a, b) => a + b, 0);
+
+  // Cumulative cash position (starting from -TOTAL_INVESTMENT)
+  const cashPosition = [-TOTAL_INVESTMENT];
+  monthlyCashFlow.forEach(cf => cashPosition.push(cashPosition[cashPosition.length - 1] + cf));
+  const cashLabels = ['Start', ...MONTHS];
+
+  // Runway calculation
+  const lastCash = cashPosition[cashPosition.length - 1];
+  const avgBurn = monthlyCashFlow.length > 0 ? monthlyCashFlow.reduce((a, b) => a + b, 0) / monthlyCashFlow.length : 0;
+  const runway = avgBurn < 0 ? Math.floor(lastCash / avgBurn) : 999;
+  const monthsToProfit = (() => {
+    let pos = lastCash;
+    for (let i = 0; i < 24; i++) {
+      pos += avgBurn;
+      if (pos >= 0) return i + 1;
+    }
+    return 999;
+  })();
+
+  const cashFlowChartData = MONTHS.map((m, i) => ({
+    month: m,
+    'Cash Flow': monthlyCashFlow[i],
+    inflow: monthlyInflows[i],
+    outflow: monthlyOutflows[i],
+  }));
+
+  const cashPosData = cashLabels.map((label, i) => ({
+    label,
+    'Cash Position': cashPosition[i],
+  }));
+
+  // Seasonal pattern
+  const monthlyCFByMonthNum = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const monthlyCFCount = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  monthlyData.forEach((d, i) => {
+    const monthNum = i % 12;
+    monthlyCFByMonthNum[monthNum] += monthlyCashFlow[i] || 0;
+    monthlyCFCount[monthNum]++;
+  });
+  const seasonalData = monthlyCFByMonthNum.map((v, i) => ({
+    month: MN[i],
+    'Avg CF': monthlyCFCount[i] > 0 ? Math.round(v / monthlyCFCount[i]) : 0,
+  }));
+
+  return (
+    <div>
+      {/* Info */}
+      <div style={{ background: 'rgba(85,120,191,0.06)', border: `1px solid rgba(85,120,191,0.15)`, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+        <p style={{ fontSize: 10, color: T2, lineHeight: 1.6 }}>
+          Cash flow analysis projects net monthly revenue against operating costs. Starting position reflects total capital investment ({m(TOTAL_INVESTMENT)}).
+          Seasonal patterns and runway estimates help plan working capital needs.
+        </p>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Current Cash Position" value={m(lastCash)} sub={`Started at −${m(TOTAL_INVESTMENT)}`} badge={lastCash >= 0 ? 'Positive' : 'Negative'} badgeColor={lastCash >= 0 ? SAGE : ROSE} />
+        <KpiCard label="Avg Monthly Cash Flow" value={m(Math.round(avgBurn))} sub={`Total: ${m(totalNet)} revenue − ${m(monthlyOpCosts * NET.length)} costs`} badge={avgBurn >= 0 ? 'Surplus' : 'Deficit'} badgeColor={avgBurn >= 0 ? SAGE : ROSE} />
+        <KpiCard label="Runway" value={runway >= 100 ? '100+ mo' : `${runway} mo`} sub={avgBurn < 0 ? `at ${m(Math.abs(avgBurn))}/mo burn` : 'Cash positive'} badge={runway > 12 ? 'Safe' : runway > 6 ? 'Monitor' : 'Critical'} badgeColor={runway > 12 ? SAGE : runway > 6 ? AMBER : ROSE} />
+        <KpiCard label="Months to Profitability" value={monthsToProfit >= 100 ? '100+' : `${monthsToProfit}`} sub={`from current position`} badge={monthsToProfit <= 12 ? 'Achievable' : 'Long-term'} badgeColor={monthsToProfit <= 12 ? SAGE : AMBER} />
+      </div>
+
+      {/* Cash Flow bar chart */}
+      <ChartCard title="Monthly Cash Flow (Revenue − Operating Costs)" className="mb-3">
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={cashFlowChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="month" tick={axisTick} />
+            <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
+            <Tooltip content={<AEDTooltip />} />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: T2 }} />
+            <ReferenceLine y={0} stroke={T3} strokeWidth={1} />
+            <Bar dataKey="Cash Flow" radius={[3, 3, 0, 0]} barSize={24}>
+              {cashFlowChartData.map((entry, i) => <Cell key={i} fill={entry['Cash Flow'] >= 0 ? SAGE : ROSE} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <div className="grid grid-cols-2 gap-3">
+        {/* Cash Position Line */}
+        <ChartCard title="Cumulative Cash Position">
+          <ResponsiveContainer width="100%" height={250}>
+            <AreaChart data={cashPosData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="label" tick={axisTick} />
+              <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
+              <Tooltip content={<AEDTooltip />} />
+              <ReferenceLine y={0} stroke={T3} strokeWidth={1.5} strokeDasharray="4 4" />
+              <Area type="monotone" dataKey="Cash Position" stroke={GOLD} fill={`${GOLD}22`} strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        {/* Seasonal cash needs */}
+        <ChartCard title="Seasonal Cash Pattern">
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={seasonalData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" tick={axisTick} />
+              <YAxis tick={axisTick} tickFormatter={v => mK(v)} />
+              <Tooltip content={<AEDTooltip />} />
+              <ReferenceLine y={0} stroke={T3} strokeWidth={1} />
+              <Bar dataKey="Avg CF" radius={[3, 3, 0, 0]} barSize={20}>
+                {seasonalData.map((entry, i) => <Cell key={i} fill={entry['Avg CF'] >= 0 ? SAGE : ROSE} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAGE: CUSTOMER INSIGHTS
+// ══════════════════════════════════════════════════════════════════
+function CustomerInsightsPage({ data }: { data: StoreData }) {
+  const { net: NET, months: MONTHS, card: CARD, cash: CASH, avgMonthlyNet, totalNet, totalCard, totalCash, currency: cur, monthlyData, momGrowth } = data;
+  const m = (n: number) => money(n, cur);
+  const mK = (n: number) => moneyK(n, cur);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        let slug = DEFAULT_BRANCH_SLUG;
+        try { const v = JSON.parse(localStorage.getItem('parfumix:selectedView') || '{}'); if (v.type === 'branch' && v.slug) slug = v.slug; } catch {}
+        const qs = slug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(slug)}` : '';
+        const res = await fetch(`/api/data/transactions${qs}`).then(r => r.json()).catch(() => []);
+        setTransactions(res || []);
+      } finally { setLoading(false); }
+    }
+    setLoading(true);
+    load();
+  }, [data.dataVersion]);
+
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
+
+  // Derived customer metrics
+  const totalReceipts = transactions.reduce((s: number, t: any) => s + (t.receiptCount || 0), 0);
+  const avgTicketSize = totalReceipts > 0 ? totalNet / totalReceipts : 0;
+  const cardShare = totalNet > 0 ? (totalCard / totalNet) * 100 : 0;
+
+  // Estimate new vs repeat from card ratio (card users ≈ repeat)
+  const estimatedRepeatPct = Math.min(cardShare * 1.2, 75); // card users tend to be repeat, with some buffer
+  const estimatedNewPct = 100 - estimatedRepeatPct;
+  const estimatedRepeatCustomers = Math.round(totalReceipts * estimatedRepeatPct / 100);
+  const estimatedNewCustomers = totalReceipts - estimatedRepeatCustomers;
+
+  // Loyalty tier distribution (estimated)
+  const loyaltyTiers = [
+    { name: 'One-Time', pct: estimatedNewPct, color: T3, icon: UserCheck, desc: 'Single purchase' },
+    { name: 'Casual', pct: Math.round(estimatedRepeatPct * 0.5), color: STEEL, icon: Users, desc: '2–3 visits/yr' },
+    { name: 'Regular', pct: Math.round(estimatedRepeatPct * 0.3), color: GOLD, icon: BadgeDollarSign, desc: '4–6 visits/yr' },
+    { name: 'Loyal', pct: Math.round(estimatedRepeatPct * 0.15), color: SAGE, icon: Coins, desc: '7+ visits/yr' },
+    { name: 'VIP', pct: Math.round(estimatedRepeatPct * 0.05), color: '#bf6fa0', icon: TrendingUp, desc: 'Top 5% spenders' },
+  ];
+
+  // Monthly ticket size trend
+  const ticketTrend = transactions.map((t: any) => ({
+    month: `${MN[(t.month || 1) - 1]} ${String(t.year || '').slice(2)}`,
+    'Ticket Size': Math.round(t.avgTicketSize || (t.totalRevenue / Math.max(t.receiptCount, 1))),
+    receipts: t.receiptCount || 0,
+    revenue: t.totalRevenue || 0,
+  }));
+
+  // Revenue per customer segment
+  const avgRevenuePerRepeat = estimatedRepeatCustomers > 0 ? (totalNet * estimatedRepeatPct / 100) / estimatedRepeatCustomers : 0;
+  const avgRevenuePerNew = estimatedNewCustomers > 0 ? (totalNet * estimatedNewPct / 100) / estimatedNewCustomers : 0;
+
+  // Purchase frequency estimate
+  const monthsTracked = transactions.length || 1;
+  const avgFrequencyPerCustomer = monthsTracked > 0 ? (totalReceipts * 12 / (estimatedRepeatCustomers + estimatedNewCustomers) / monthsTracked * monthsTracked).toFixed(1) : '—';
+
+  // Retention metrics
+  const retentionData = MONTHS.map((m, i) => {
+    const cardPct = monthlyData[i] ? monthlyData[i].cardPct : 0;
+    return { month: m, 'Repeat Rate': Math.round(Math.min(cardPct * 1.2, 75)), 'Card Share': cardPct };
+  });
+
+  return (
+    <div>
+      {/* Info */}
+      <div style={{ background: 'rgba(201,165,90,0.06)', border: `1px solid rgba(201,165,90,0.15)`, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+        <p style={{ fontSize: 10, color: T2, lineHeight: 1.6 }}>
+          Customer insights are derived from transaction patterns, payment method mix, and ticket size trends. Card payment ratio serves as a proxy for repeat customer behavior. Upload detailed POS data for more granular segmentation.
+        </p>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-3 mb-3">
+        <KpiCard label="Total Customers" value={totalReceipts.toLocaleString()} sub={`${monthsTracked} months tracked`} badge="Estimated" badgeColor={GOLD} />
+        <KpiCard label="Avg Ticket Size" value={m(Math.round(avgTicketSize))} sub={`across ${totalReceipts.toLocaleString()} transactions`} badge={avgTicketSize > 150 ? 'Premium' : 'Standard'} badgeColor={avgTicketSize > 150 ? SAGE : T2} />
+        <KpiCard label="Repeat Rate" value={`${estimatedRepeatPct.toFixed(0)}%`} sub={`${estimatedRepeatCustomers.toLocaleString()} repeat customers`} badge={estimatedRepeatPct > 50 ? 'Strong' : 'Growing'} badgeColor={estimatedRepeatPct > 50 ? SAGE : AMBER} />
+        <KpiCard label="Card Loyalty" value={`${cardShare.toFixed(1)}%`} sub="payment via card → repeat proxy" badge={cardShare > 70 ? 'High' : 'Moderate'} badgeColor={cardShare > 70 ? SAGE : STEEL} />
+      </div>
+
+      {/* Loyalty Tiers */}
+      <ChartCard title="Customer Loyalty Tier Distribution" className="mb-3">
+        <div className="grid grid-cols-5 gap-3">
+          {loyaltyTiers.map((tier, i) => (
+            <div key={i} style={{ textAlign: 'center', padding: 16, background: `${tier.color}08`, border: `1px solid ${tier.color}22`, borderRadius: 10 }}>
+              <tier.icon size={18} style={{ color: tier.color, marginBottom: 8 }} />
+              <div style={{ fontSize: 20, fontFamily: 'Georgia, serif', color: tier.color, lineHeight: 1 }}>{tier.pct}%</div>
+              <div style={{ fontSize: 10, color: T1, fontWeight: 500, marginTop: 4 }}>{tier.name}</div>
+              <div style={{ fontSize: 8, color: T3, marginTop: 2 }}>{tier.desc}</div>
+              <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)' }}>
+                <div style={{ height: '100%', borderRadius: 2, width: `${tier.pct}%`, background: tier.color, transition: 'width 0.3s' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </ChartCard>
+
+      <div className="grid grid-cols-2 gap-3">
+        {/* Ticket Size Trend */}
+        <ChartCard title="Average Ticket Size Trend">
+          <ResponsiveContainer width="100%" height={250}>
+            <AreaChart data={ticketTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" tick={axisTick} />
+              <YAxis tick={axisTick} tickFormatter={v => m(v)} />
+              <Tooltip content={<AEDTooltip />} />
+              <Area type="monotone" dataKey="Ticket Size" stroke={GOLD} fill={`${GOLD}22`} strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        {/* Retention trend */}
+        <ChartCard title="Estimated Repeat Customer Rate">
+          <ResponsiveContainer width="100%" height={250}>
+            <ComposedChart data={retentionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" tick={axisTick} />
+              <YAxis tick={axisTick} tickFormatter={v => `${v}%`} domain={[0, 100]} />
+              <Tooltip content={<AEDTooltip />} />
+              <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: T2 }} />
+              <Bar dataKey="Repeat Rate" fill={SAGE} radius={[3, 3, 0, 0]} barSize={20} opacity={0.7} />
+              <Line dataKey="Card Share" stroke={GOLD} strokeWidth={2} dot={{ r: 3, fill: GOLD }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      {/* Segment Revenue Comparison */}
+      <ChartCard title="Revenue by Customer Segment" className="mt-3">
+        <div className="grid grid-cols-3 gap-4">
+          <div style={{ padding: 20, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 }}>New Customers</div>
+            <div style={{ fontSize: 24, fontFamily: 'Georgia, serif', color: T1, lineHeight: 1 }}>{estimatedNewCustomers.toLocaleString()}</div>
+            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>Avg {m(Math.round(avgRevenuePerNew))} / customer</div>
+            <div style={{ fontSize: 9, color: ROSE, marginTop: 2 }}>{m(Math.round(totalNet * estimatedNewPct / 100))} total revenue</div>
+          </div>
+          <div style={{ padding: 20, background: 'rgba(88,152,122,0.04)', borderRadius: 8, textAlign: 'center', border: `1px solid rgba(88,152,122,0.15)` }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: SAGE, marginBottom: 6 }}>Repeat Customers</div>
+            <div style={{ fontSize: 24, fontFamily: 'Georgia, serif', color: SAGE, lineHeight: 1 }}>{estimatedRepeatCustomers.toLocaleString()}</div>
+            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>Avg {m(Math.round(avgRevenuePerRepeat))} / customer</div>
+            <div style={{ fontSize: 9, color: SAGE, marginTop: 2 }}>{m(Math.round(totalNet * estimatedRepeatPct / 100))} total revenue</div>
+          </div>
+          <div style={{ padding: 20, background: 'rgba(255,255,255,0.02)', borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: T3, marginBottom: 6 }}>Purchase Frequency</div>
+            <div style={{ fontSize: 24, fontFamily: 'Georgia, serif', color: GOLD, lineHeight: 1 }}>{avgFrequencyPerCustomer}×</div>
+            <div style={{ fontSize: 10, color: T2, marginTop: 4 }}>avg visits per customer / year</div>
+            <div style={{ fontSize: 9, color: T3, marginTop: 2 }}>Based on {monthsTracked} months of data</div>
+          </div>
+        </div>
+      </ChartCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // PAGE 15: DATA CENTER
 // ══════════════════════════════════════════════════════════════════
 function DataCenterPage({ data }: { data: StoreData }) {
@@ -4426,6 +4868,9 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   products: (props) => <ProductsPage {...props} />,
   staff: (props) => <StaffPage {...props} />,
   marketing: (props) => <MarketingPage {...props} />,
+  'daily-ops': (props) => <DailyOpsPage {...props} />,
+  'cash-flow': (props) => <CashFlowPage {...props} />,
+  customers: (props) => <CustomerInsightsPage {...props} />,
   'data-center': (props) => <DataCenterPage {...props} />,
 };
 

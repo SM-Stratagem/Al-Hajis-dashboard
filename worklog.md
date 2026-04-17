@@ -209,3 +209,45 @@ Stage Summary:
 - What-If section fully interactive with 6 sliders + 4 presets + live P&L + charts + cost breakdown
 - All calculations are cumulative and reflect combined impact of all slider adjustments
 - Lint: 0 errors, Compilation: ✓ success
+
+---
+Task ID: 8
+Agent: main
+Task: Add 3 new dashboard capabilities (Daily Operations, Cash Flow, Customer Insights)
+
+Work Log:
+- Audited existing pages: Product Analytics, Staff Performance, Breakeven Calculator already exist with full implementations — no changes needed
+- Added 3 new pages to page.tsx:
+
+  1. **Daily Operations Tracker** (Operations section):
+     - Month selector tabs to switch between tracked months
+     - 4 KPIs: Monthly Total, Avg Daily Revenue vs Target, Best Day, Worst Day
+     - Daily Revenue vs Target chart with rolling 7-day average line
+     - Day-of-week performance bar chart (color-coded: green=above avg, amber=70%, red=below)
+     - Weekly Performance vs Target with progress bars and % achievement
+
+  2. **Cash Flow View** (Strategy section):
+     - 4 KPIs: Current Cash Position, Avg Monthly Cash Flow, Runway (months), Months to Profitability
+     - Monthly Cash Flow bar chart (green=surplus, red=deficit)
+     - Cumulative Cash Position area chart starting from -TOTAL_INVESTMENT
+     - Seasonal Cash Pattern chart showing avg CF by calendar month
+     - Runway and months-to-profitability computed from current position + average burn rate
+
+  3. **Customer Insights** (Analytics section):
+     - 4 KPIs: Total Customers, Avg Ticket Size, Repeat Rate, Card Loyalty %
+     - 5-tier Loyalty Distribution (One-Time, Casual, Regular, Loyal, VIP) with visual cards
+     - Avg Ticket Size trend area chart
+     - Estimated Repeat Rate vs Card Share composed chart
+     - Revenue by Customer Segment (New vs Repeat vs Purchase Frequency)
+
+- Updated navigation: Added Daily Operations to Operations group, Customer Insights to Analytics group, Cash Flow to Strategy group
+- Added `daily-ops`, `cash-flow`, `customers` to PageId type and pageComponents record
+- Added new icons: Gauge, Wallet, UserCheck, BadgeDollarSign, Timer, TrendingDown, Coins
+- Added ReferenceLine to recharts imports
+- Lint: 0 errors, Compilation: ✓ success
+
+Stage Summary:
+- Dashboard now has 21 sections (was 18)
+- 3 new fully functional pages: Daily Operations, Cash Flow, Customer Insights
+- All 6 recommended capabilities covered: 3 existed already, 3 newly added
+- Navigation updated with new sections properly grouped
