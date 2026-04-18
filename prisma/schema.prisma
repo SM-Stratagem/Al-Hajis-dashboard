@@ -31,6 +31,8 @@ model Branch {
   overheads         Overhead[]
   pnlPeriods        PnlPeriod[]
   productSales      ProductSale[]
+  supplyItems       SupplyItem[]
+  supplyOrders      SupplyOrder[]
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -242,4 +244,102 @@ model DataUpload {
   status    String   @default("success") // success, error, partial
   error     String?
   createdAt DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SUPPLY CHAIN — STOCK ON HAND (SOH)
+// ═══════════════════════════════════════════════════════════════
+
+model SupplyItem {
+  id             String   @id @default(cuid())
+  itemId         String   @unique
+  itemName       String
+  category       String   // Oil, Alcohol, Combiner, Accessories
+  currentQtyL    Float    @default(0)
+  minThresholdL  Float    @default(0)
+  unitCostAED    Float    @default(0)
+  supplierId     String?
+  supplierName   String?
+  lastUpdated    DateTime @default(now())
+  lastSoldDate   String?  // ISO date of last sale (for slow-moving detection)
+
+  branchId       String
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  consumptions   SupplyConsumption[]
+  orderLines     SupplyOrderLine[]
+
+  @@index([branchId, category])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SUPPLY CHAIN — PURCHASE CONSUMPTION RECORDS
+// ═══════════════════════════════════════════════════════════════
+
+model SupplyConsumption {
+  id            String   @id @default(cuid())
+  date          String   // "YYYY-MM-DD"
+  qtyUsedL      Float
+  staffCode     String?
+  transactionType String @default("sale") // sale, blending, wastage
+
+  supplyItemId  String
+  supplyItem    SupplyItem @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+
+  @@index([supplyItemId, date])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SUPPLY CHAIN — ORDER FORMS
+// ═══════════════════════════════════════════════════════════════
+
+model SupplyOrder {
+  id             String   @id @default(cuid())
+  orderId        String   @unique  // "ORD-XXXX"
+  branchId       String
+  branchName     String
+  dateCreated    DateTime @default(now())
+  deliveryRequested String?
+  generatedBy    String   @default("AI") // "AI" or staff code
+  orderTotalAED  Float    @default(0)
+  status         String   @default("draft") // draft, submitted, approved, delivered, partial
+  notes          String?
+
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  lineItems      SupplyOrderLine[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([branchId, status])
+  @@index([orderId])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SUPPLY CHAIN — ORDER LINE ITEMS
+// ═══════════════════════════════════════════════════════════════
+
+model SupplyOrderLine {
+  id             String   @id @default(cuid())
+  itemId         String
+  itemName       String
+  category       String
+  currentSohL    Float
+  orderQtyL      Float
+  unitCostAED    Float
+  lineTotalAED   Float
+  priority       String   // CRITICAL, LOW, OPTIONAL
+  supplierLeadDays Int    @default(3)
+  urgent         Boolean  @default(false)
+
+  supplyItemId   String?
+  supplyItem     SupplyItem? @relation(fields: [supplyItemId], references: [id])
+
+  supplyOrderId  String
+  supplyOrder    SupplyOrder @relation(fields: [supplyOrderId], references: [id], onDelete: Cascade)
+
+  @@index([supplyOrderId])
 }

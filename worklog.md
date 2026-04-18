@@ -251,3 +251,32 @@ Stage Summary:
 - 3 new fully functional pages: Daily Operations, Cash Flow, Customer Insights
 - All 6 recommended capabilities covered: 3 existed already, 3 newly added
 - Navigation updated with new sections properly grouped
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Add Supply Chain Intelligence section to Parfumix ADCB Dashboard
+
+Work Log:
+- Extended Prisma schema with 4 new models: SupplyItem, SupplyConsumption, SupplyOrder, SupplyOrderLine
+- Added supplyItems and supplyOrders relations to Branch model
+- Generated Prisma client and pushed schema to SQLite database
+- Created comprehensive seed data: 24 inventory items (8 Oils, 4 Alcohol, 4 Combiners, 8 Accessories), 185 daily consumption records, 3 historical orders
+- Updated seed route (api/data/seed) to include supply chain data seeding with proper cleanup
+- Created 4 API routes:
+  - GET/POST /api/supply-chain/inventory - fetch inventory with computed stock health (CRITICAL/LOW/HEALTHY)
+  - POST /api/supply-chain/smart-order - AI smart order generator with 5-step logic, safety factor, 45-day cap
+  - GET/POST /api/supply-chain/orders - order history and order creation
+  - GET /api/supply-chain/summary - aggregated dashboard metrics (stock value, capital deployed/idle, turnover)
+- Built SupplyChainPage component (~780 lines) with 3 sub-tabs:
+  - Stock Visibility: 4 KPI cards, category filter, full inventory table with status indicators
+  - Smart Order: AI generator with safety factor slider, priority badges, save functionality
+  - Order History: status filter, expandable order cards with line items
+- Added 'supply-chain' to PageId type, navSections (Operations group), and pageComponents
+- All APIs verified working with seeded data: 24 items, 1 CRITICAL, 12 LOW, 11 HEALTHY, AED 16,372.70 total stock value
+
+Stage Summary:
+- Supply Chain Intelligence section fully integrated into the dashboard
+- Smart ordering logic implements all 5 steps from the spec (avg daily consumption, days remaining, CRITICAL/LOW/HEALTHY flags, order qty with safety factor, 45-day max cap)
+- All monetary values in AED, all volumes in Litres (L)
+- Server running on port 3000, page loads at 200/40KB, lint passes clean

@@ -566,7 +566,7 @@ function ChartCard({ title, children, wide }: { title?: string; children: React.
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
 // ══════════════════════════════════════════════════════════════════
-type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'daily-ops' | 'cash-flow' | 'customers' | 'data-center';
+type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'supply-chain' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'daily-ops' | 'cash-flow' | 'customers' | 'data-center';
 
 const navSections = [
   {
@@ -599,6 +599,7 @@ const navSections = [
       { id: 'daily-ops' as PageId, label: 'Daily Operations', icon: Gauge },
       { id: 'returns' as PageId, label: 'Returns', icon: RotateCcw },
       { id: 'payments' as PageId, label: 'Payment Mix', icon: CreditCard },
+      { id: 'supply-chain' as PageId, label: 'Supply Chain', icon: ShoppingCart, badge: 'AI' },
     ],
   },
   {
@@ -4848,6 +4849,786 @@ function MarketingPage({ data }: { data: StoreData }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// SUPPLY CHAIN PAGE
+// ══════════════════════════════════════════════════════════════════
+
+function SupplyChainPage({ data }: { data: StoreData }) {
+  const [activeTab, setActiveTab] = useState<'stock' | 'smart-order' | 'orders'>('stock');
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null);
+  const [smartOrder, setSmartOrder] = useState<any>(null);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [filterCat, setFilterCat] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [safetyFactor, setSafetyFactor] = useState(1.3);
+  const [includeHealthy, setIncludeHealthy] = useState(false);
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+
+  const branchSlug = useMemo(() => {
+    try {
+      const stored = localStorage.getItem(BRANCH_LS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.type === 'branch' && parsed.slug) return parsed.slug;
+      }
+    } catch {}
+    return DEFAULT_BRANCH_SLUG;
+  }, []);
+
+  // Fetch inventory & summary
+  useEffect(() => {
+    let cancelled = false;
+    async function loadData() {
+      setLoading(true);
+      try {
+        const [invRes, ordRes] = await Promise.all([
+          fetch(`/api/supply-chain/inventory?branchSlug=${branchSlug}`),
+          fetch(`/api/supply-chain/orders?branchSlug=${branchSlug}&limit=50`),
+        ]);
+        const invData = await invRes.json();
+        const ordData = await ordRes.json();
+        if (!cancelled) {
+          setInventory(invData.items || []);
+          setSummary(invData);
+          setOrders(ordData.orders || []);
+        }
+      } catch (err) {
+        console.error('Supply chain load error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadData();
+    return () => { cancelled = true; };
+  }, [branchSlug]);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
+  const generateSmartOrder = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch('/api/supply-chain/smart-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchSlug, safetyFactor, includeHealthy }),
+      });
+      const result = await res.json();
+      if (result.order) {
+        setSmartOrder(result);
+        setActiveTab('smart-order');
+      } else {
+        setToast('No items require reordering right now.');
+      }
+    } catch {
+      setToast('Failed to generate smart order.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const saveOrder = async () => {
+    if (!smartOrder?.order) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/supply-chain/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchSlug, order: smartOrder.order }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setToast(`Order ${smartOrder.order.orderId} saved successfully!`);
+        setSmartOrder(null);
+        // Refresh orders
+        const ordRes = await fetch(`/api/supply-chain/orders?branchSlug=${branchSlug}&limit=50`);
+        const ordData = await ordRes.json();
+        setOrders(ordData.orders || []);
+      } else {
+        setToast(result.error || 'Failed to save order.');
+      }
+    } catch {
+      setToast('Failed to save order.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Helpers ──
+  const catColor = (cat: string) => {
+    switch (cat) {
+      case 'Oil': return SAGE;
+      case 'Alcohol': return STEEL;
+      case 'Combiner': return AMBER;
+      case 'Accessories': return GOLD;
+      default: return T2;
+    }
+  };
+
+  const statusColor = (s: string) => {
+    switch (s) {
+      case 'draft': return T3;
+      case 'submitted': return STEEL;
+      case 'approved': return GOLD;
+      case 'delivered': return SAGE;
+      case 'partial': return AMBER;
+      default: return T3;
+    }
+  };
+
+  const priorityColor = (p: string) => {
+    switch (p) {
+      case 'CRITICAL': return ROSE;
+      case 'LOW': return AMBER;
+      case 'OPTIONAL': return SAGE;
+      case 'HEALTHY': return SAGE;
+      default: return T2;
+    }
+  };
+
+  const daysColor = (d: number | null) => {
+    if (d === null) return SAGE;
+    if (d <= 5) return ROSE;
+    if (d <= 14) return AMBER;
+    return SAGE;
+  };
+
+  const filteredInventory = inventory.filter(
+    (item) => filterCat === 'all' || item.category === filterCat
+  );
+
+  const filteredOrders = orders.filter(
+    (o) => filterStatus === 'all' || o.status === filterStatus
+  );
+
+  // ── Tab bar ──
+  const tabs = [
+    { id: 'stock' as const, label: 'Stock Visibility', icon: Package },
+    { id: 'smart-order' as const, label: 'Smart Order', icon: Zap },
+    { id: 'orders' as const, label: 'Order History', icon: ClipboardList },
+  ];
+
+  const tabBtn = (tab: typeof tabs[0]) => (
+    <button
+      key={tab.id}
+      onClick={() => setActiveTab(tab.id)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+        borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11,
+        fontWeight: 500, transition: 'all 0.15s',
+        background: activeTab === tab.id ? `${GOLD}18` : 'transparent',
+        color: activeTab === tab.id ? GOLD : T2,
+        borderBottom: activeTab === tab.id ? `2px solid ${GOLD}` : '2px solid transparent',
+      }}
+    >
+      <tab.icon size={13} />
+      {tab.label}
+    </button>
+  );
+
+  // ── Loading ──
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+        <RefreshCw size={24} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} />
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // TAB 1: STOCK VISIBILITY
+  // ═══════════════════════════════════════════════════════════════
+  const renderStockTab = () => {
+    const kpis = [
+      { label: 'Total Stock Value', value: aed(summary?.totalStockValueAED || 0), color: GOLD },
+      { label: 'Items Tracked', value: String(summary?.itemCount || 0), color: STEEL },
+      { label: 'Critical Items', value: String(summary?.criticalCount || 0), color: ROSE },
+      { label: 'Slow Moving', value: String(summary?.slowMovingCount || 0), color: AMBER },
+    ];
+
+    const categories = ['all', 'Oil', 'Alcohol', 'Combiner', 'Accessories'];
+
+    return (
+      <div>
+        {/* KPIs */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+          {kpis.map((kpi) => (
+            <div key={kpi.label} style={{
+              background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+              padding: '14px 16px',
+            }}>
+              <div style={{ fontSize: 9, color: T2, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                {kpi.label}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: kpi.color, fontFamily: 'Georgia, serif' }}>
+                {kpi.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Category filter */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+          {categories.map((cat) => (
+            <button key={cat} onClick={() => setFilterCat(cat)} style={{
+              padding: '4px 12px', borderRadius: 20, border: `1px solid ${BORDER}`,
+              background: filterCat === cat ? `${GOLD}20` : 'transparent',
+              color: filterCat === cat ? GOLD : T2, fontSize: 10, fontWeight: 500,
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}>
+              {cat === 'all' ? 'All Categories' : cat}
+            </button>
+          ))}
+        </div>
+
+        {/* Inventory table */}
+        <div style={{
+          background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+          overflow: 'hidden',
+        }}>
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                  {['Item Name', 'Category', 'Current Stock', 'Min Threshold', 'Unit Cost', 'Stock Value', 'Days Left', 'Status'].map((h) => (
+                    <th key={h} style={{
+                      padding: '10px 12px', textAlign: 'left', fontWeight: 500,
+                      color: T3, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em',
+                      position: 'sticky', top: 0, background: CARD_BG, zIndex: 1,
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInventory.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: T3, fontSize: 11 }}>
+                      No inventory items found.
+                    </td>
+                  </tr>
+                )}
+                {filteredInventory.map((item) => {
+                  const statusBorder = item.stockStatus === 'CRITICAL' ? ROSE
+                    : item.stockStatus === 'LOW' ? AMBER : SAGE;
+                  const pctOfThreshold = item.minThresholdL > 0
+                    ? Math.min((item.currentQtyL / item.minThresholdL) * 100, 100) : 0;
+                  return (
+                    <tr key={item.id} style={{
+                      borderBottom: `1px solid ${BORDER}`,
+                      borderLeft: `3px solid ${statusBorder}`,
+                    }}>
+                      <td style={{ padding: '10px 12px', color: T1, fontWeight: 500 }}>
+                        {item.itemName}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 10,
+                          fontSize: 9, fontWeight: 600,
+                          background: `${catColor(item.category)}18`, color: catColor(item.category),
+                        }}>
+                          {item.category}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ color: T1, fontWeight: 500 }}>{item.currentQtyL.toFixed(1)} L</span>
+                          <div style={{
+                            width: 60, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.06)',
+                            overflow: 'hidden',
+                          }}>
+                            <div style={{
+                              width: `${pctOfThreshold}%`, height: '100%', borderRadius: 2,
+                              background: statusBorder,
+                            }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 12px', color: T2 }}>
+                        {item.minThresholdL.toFixed(1)} L
+                      </td>
+                      <td style={{ padding: '10px 12px', color: T2 }}>
+                        {aed(item.unitCostAED)}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: T1, fontWeight: 500 }}>
+                        {aed(item.stockValueAED)}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: daysColor(item.daysRemaining), fontWeight: 600 }}>
+                        {item.daysRemaining === null ? '∞' : `${item.daysRemaining}d`}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                          fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+                          background: `${priorityColor(item.stockStatus)}20`, color: priorityColor(item.stockStatus),
+                        }}>
+                          {item.stockStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // TAB 2: SMART ORDER
+  // ═══════════════════════════════════════════════════════════════
+  const renderSmartOrderTab = () => {
+    return (
+      <div>
+        {/* Header */}
+        <div style={{
+          background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+          padding: '20px 24px', marginBottom: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <Zap size={16} style={{ color: GOLD }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: T1 }}>AI Smart Order Generator</span>
+          </div>
+          <p style={{ fontSize: 11, color: T2, lineHeight: 1.5, marginBottom: 16 }}>
+            Automatically generates a purchase order based on current stock levels, 30-day consumption averages,
+            and supplier lead times. The safety factor adds buffer stock to prevent stockouts.
+          </p>
+
+          {/* Controls */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, flexWrap: 'wrap' }}>
+            {/* Safety Factor Slider */}
+            <div style={{ flex: '0 0 240px' }}>
+              <label style={{ fontSize: 10, color: T2, display: 'block', marginBottom: 6 }}>
+                Safety Factor: <span style={{ color: GOLD, fontWeight: 600 }}>{safetyFactor.toFixed(1)}x</span>
+              </label>
+              <input
+                type="range"
+                min="1.0"
+                max="2.0"
+                step="0.1"
+                value={safetyFactor}
+                onChange={(e) => setSafetyFactor(parseFloat(e.target.value))}
+                style={{ width: '100%', accentColor: GOLD }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: T3, marginTop: 2 }}>
+                <span>1.0x (Lean)</span>
+                <span>2.0x (Conservative)</span>
+              </div>
+            </div>
+
+            {/* Include Healthy Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                onClick={() => setIncludeHealthy(!includeHealthy)}
+                style={{
+                  width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+                  background: includeHealthy ? `${SAGE}40` : 'rgba(255,255,255,0.08)',
+                  position: 'relative', transition: 'background 0.2s',
+                }}
+              >
+                <div style={{
+                  width: 14, height: 14, borderRadius: 7,
+                  background: includeHealthy ? SAGE : T3,
+                  position: 'absolute', top: 3,
+                  left: includeHealthy ? 19 : 3,
+                  transition: 'left 0.2s',
+                }} />
+              </button>
+              <span style={{ fontSize: 10, color: T2 }}>Include Healthy Items</span>
+            </div>
+
+            {/* Generate Button */}
+            <button
+              onClick={generateSmartOrder}
+              disabled={generating}
+              style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                background: generating ? 'rgba(255,255,255,0.06)' : `${GOLD}18`,
+                color: generating ? T3 : GOLD, fontSize: 11, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
+              }}
+            >
+              {generating ? (
+                <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <Zap size={12} />
+              )}
+              {generating ? 'Generating...' : 'Generate Order'}
+            </button>
+          </div>
+        </div>
+
+        {/* Generated Order */}
+        {smartOrder?.order && (
+          <div style={{
+            background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+            overflow: 'hidden',
+          }}>
+            {/* Order Header */}
+            <div style={{
+              padding: '16px 24px', borderBottom: `1px solid ${BORDER}`,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: T1 }}>{smartOrder.order.orderId}</span>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 700,
+                    background: `${GOLD}20`, color: GOLD, letterSpacing: '0.04em',
+                  }}>DRAFT</span>
+                </div>
+                <div style={{ fontSize: 10, color: T2 }}>
+                  {new Date(smartOrder.order.dateCreated).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                  {' · '}{smartOrder.order.branchName}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: T2, marginBottom: 2 }}>Order Total</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: GOLD, fontFamily: 'Georgia, serif' }}>
+                  {aed(smartOrder.order.orderTotalAED)}
+                </div>
+              </div>
+            </div>
+
+            {/* Priority Summary */}
+            {smartOrder.summary && (
+              <div style={{
+                padding: '12px 24px', borderBottom: `1px solid ${BORDER}`,
+                display: 'flex', gap: 16, flexWrap: 'wrap',
+              }}>
+                {[
+                  { label: 'Critical', count: smartOrder.summary.criticalCount, color: ROSE },
+                  { label: 'Low', count: smartOrder.summary.lowCount, color: AMBER },
+                  { label: 'Optional', count: smartOrder.summary.healthyCount, color: SAGE },
+                  { label: 'Urgent', count: smartOrder.summary.urgentCount, color: '#e04040' },
+                ].map((p) => (
+                  <div key={p.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: 2,
+                      background: p.color,
+                    }} />
+                    <span style={{ fontSize: 10, color: T2 }}>{p.label}:</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: p.color }}>{p.count}</span>
+                  </div>
+                ))}
+                <span style={{ fontSize: 10, color: T3, marginLeft: 'auto' }}>
+                  {smartOrder.summary.totalLineItems} items · Safety {safetyFactor.toFixed(1)}x
+                </span>
+              </div>
+            )}
+
+            {/* Line Items */}
+            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                    {['Item Name', 'Category', 'Current SOH', 'Order Qty', 'Unit Cost', 'Line Total', 'Priority', 'Urgent'].map((h) => (
+                      <th key={h} style={{
+                        padding: '10px 12px', textAlign: 'left', fontWeight: 500,
+                        color: T3, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em',
+                        position: 'sticky', top: 0, background: CARD_BG, zIndex: 1,
+                      }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {smartOrder.order.lineItems.map((line: any, idx: number) => (
+                    <tr key={idx} style={{
+                      borderBottom: `1px solid ${BORDER}`,
+                      borderLeft: `3px solid ${priorityColor(line.priority)}`,
+                    }}>
+                      <td style={{ padding: '10px 12px', color: T1, fontWeight: 500 }}>{line.itemName}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 10,
+                          fontSize: 9, fontWeight: 600,
+                          background: `${catColor(line.category)}18`, color: catColor(line.category),
+                        }}>
+                          {line.category}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', color: T2 }}>{line.currentSohL.toFixed(1)} L</td>
+                      <td style={{ padding: '10px 12px', color: T1, fontWeight: 600 }}>{line.orderQtyL.toFixed(1)} L</td>
+                      <td style={{ padding: '10px 12px', color: T2 }}>{aed(line.unitCostAED)}</td>
+                      <td style={{ padding: '10px 12px', color: T1, fontWeight: 600 }}>{aed(line.lineTotalAED)}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                          fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+                          background: `${priorityColor(line.priority)}20`, color: priorityColor(line.priority),
+                        }}>
+                          {line.priority}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        {line.urgent && (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 3,
+                            padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 700,
+                            background: 'rgba(224,64,64,0.15)', color: '#e04040',
+                          }}>
+                            <AlertCircle size={9} /> URGENT
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '14px 24px', borderTop: `1px solid ${BORDER}`,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+            }}>
+              <div style={{ fontSize: 9, color: T3, lineHeight: 1.6 }}>
+                <span style={{ color: T2 }}>Rules applied:</span> 45-day stock cap · Safety factor {safetyFactor.toFixed(1)}x
+                · Rounded to 0.5L increments · Supplier lead time: 3 days
+              </div>
+              <button
+                onClick={saveOrder}
+                disabled={saving}
+                style={{
+                  padding: '8px 20px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                  background: saving ? 'rgba(255,255,255,0.06)' : `${SAGE}20`,
+                  color: saving ? T3 : SAGE, fontSize: 11, fontWeight: 600,
+                  display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
+                }}
+              >
+                {saving ? (
+                  <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <CheckCircle2 size={12} />
+                )}
+                {saving ? 'Saving...' : 'Save Order'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!smartOrder && (
+          <div style={{
+            background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+            padding: 48, textAlign: 'center',
+          }}>
+            <Package size={32} style={{ color: T3, marginBottom: 12 }} />
+            <div style={{ fontSize: 12, color: T2, marginBottom: 4 }}>No order generated yet</div>
+            <div style={{ fontSize: 10, color: T3 }}>
+              Adjust the safety factor and click &quot;Generate Order&quot; to create an AI-optimized purchase order.
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // TAB 3: ORDER HISTORY
+  // ═══════════════════════════════════════════════════════════════
+  const renderOrdersTab = () => {
+    const statuses = ['all', 'draft', 'submitted', 'approved', 'delivered', 'partial'];
+
+    return (
+      <div>
+        {/* Status Filter */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+          {statuses.map((s) => (
+            <button key={s} onClick={() => setFilterStatus(s)} style={{
+              padding: '4px 12px', borderRadius: 20, border: `1px solid ${BORDER}`,
+              background: filterStatus === s ? `${GOLD}20` : 'transparent',
+              color: filterStatus === s ? GOLD : T2, fontSize: 10, fontWeight: 500,
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}>
+              {s === 'all' ? 'All Statuses' : s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* Orders List */}
+        {filteredOrders.length === 0 && (
+          <div style={{
+            background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+            padding: 48, textAlign: 'center',
+          }}>
+            <ClipboardList size={32} style={{ color: T3, marginBottom: 12 }} />
+            <div style={{ fontSize: 12, color: T2, marginBottom: 4 }}>No orders found</div>
+            <div style={{ fontSize: 10, color: T3 }}>
+              Orders generated from Smart Order will appear here.
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {filteredOrders.map((order) => {
+            const isExpanded = expandedOrder === order.id;
+            return (
+              <div key={order.id} style={{
+                background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8,
+                overflow: 'hidden',
+              }}>
+                {/* Order Row */}
+                <div
+                  onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
+                  style={{
+                    padding: '14px 20px', cursor: 'pointer', display: 'flex',
+                    justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.02)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <ChevronRight
+                      size={14}
+                      style={{
+                        color: T3, transition: 'transform 0.2s',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                      }}
+                    />
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: T1 }}>{order.orderId}</span>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 4, fontSize: 8, fontWeight: 700,
+                          letterSpacing: '0.04em', textTransform: 'uppercase',
+                          background: `${statusColor(order.status)}20`, color: statusColor(order.status),
+                        }}>
+                          {order.status}
+                        </span>
+                        {order.generatedBy === 'AI' && (
+                          <span style={{
+                            padding: '1px 6px', borderRadius: 3, fontSize: 7, fontWeight: 600,
+                            background: `${GOLD}18`, color: GOLD,
+                          }}>AI</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 9, color: T3 }}>
+                        {new Date(order.dateCreated).toLocaleDateString('en-US', {
+                          year: 'numeric', month: 'short', day: 'numeric',
+                        })}
+                        {' · '}{order.branchName}
+                        {order.notes && ` · ${order.notes}`}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: GOLD, fontFamily: 'Georgia, serif' }}>
+                        {aed(order.orderTotalAED)}
+                      </div>
+                      <div style={{ fontSize: 9, color: T3 }}>
+                        {order.lineItems?.length || 0} items
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded Line Items */}
+                {isExpanded && order.lineItems && order.lineItems.length > 0 && (
+                  <div style={{
+                    borderTop: `1px solid ${BORDER}`, maxHeight: 300, overflowY: 'auto',
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                          {['Item', 'Category', 'SOH', 'Qty', 'Cost', 'Total', 'Priority'].map((h) => (
+                            <th key={h} style={{
+                              padding: '8px 12px', textAlign: 'left', fontWeight: 500,
+                              color: T3, fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.05em',
+                            }}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.lineItems.map((line: any, idx: number) => (
+                          <tr key={idx} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                            <td style={{ padding: '8px 12px', color: T1 }}>{line.itemName}</td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <span style={{
+                                padding: '1px 6px', borderRadius: 8, fontSize: 8, fontWeight: 600,
+                                background: `${catColor(line.category)}18`, color: catColor(line.category),
+                              }}>
+                                {line.category}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px 12px', color: T2 }}>{line.currentSohL?.toFixed(1)} L</td>
+                            <td style={{ padding: '8px 12px', color: T1, fontWeight: 500 }}>{line.orderQtyL.toFixed(1)} L</td>
+                            <td style={{ padding: '8px 12px', color: T2 }}>{aed(line.unitCostAED)}</td>
+                            <td style={{ padding: '8px 12px', color: T1, fontWeight: 600 }}>{aed(line.lineTotalAED)}</td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <span style={{
+                                padding: '1px 6px', borderRadius: 3, fontSize: 7, fontWeight: 700,
+                                letterSpacing: '0.04em',
+                                background: `${priorityColor(line.priority)}20`, color: priorityColor(line.priority),
+                              }}>
+                                {line.priority}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 60, right: 28, padding: '12px 20px',
+          borderRadius: 8, background: '#1a1a22', border: `1px solid ${BORDER}`,
+          color: T1, fontSize: 11, fontWeight: 500, zIndex: 1000,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          animation: 'fadeIn 0.2s ease-out',
+        }}>
+          <CheckCircle2 size={14} style={{ color: SAGE }} />
+          {toast}
+        </div>
+      )}
+
+      {/* Tab Bar */}
+      <div style={{
+        display: 'flex', gap: 2, marginBottom: 20,
+        borderBottom: `1px solid ${BORDER}`, paddingBottom: 0,
+      }}>
+        {tabs.map(tabBtn)}
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'stock' && renderStockTab()}
+      {activeTab === 'smart-order' && renderSmartOrderTab()}
+      {activeTab === 'orders' && renderOrdersTab()}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // MAIN PAGE COMPONENT
 // ══════════════════════════════════════════════════════════════════
 const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
@@ -4862,6 +5643,7 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   weekly: (props) => <WeeklyPage {...props} />,
   returns: (props) => <ReturnsPage {...props} />,
   payments: (props) => <PaymentsPage {...props} />,
+  'supply-chain': (props) => <SupplyChainPage {...props} />,
   forecast: (props) => <ForecastPage {...props} />,
   simulator: (props) => <SimulatorPage {...props} />,
   gaps: (props) => <GapsPage {...props} />,

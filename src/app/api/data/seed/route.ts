@@ -4,6 +4,7 @@ import {
   SEED_MONTHLY_SALES, SEED_DAILY_SALES, SEED_CAPEX,
   SEED_OVERHEADS, SEED_PNL, SEED_PRODUCTS, SEED_STAFF_COSTS,
   SEED_MARKETING, SEED_TRANSACTIONS,
+  SEED_SUPPLY_ITEMS, SEED_SUPPLY_CONSUMPTIONS, SEED_SUPPLY_ORDERS,
 } from '@/lib/seed-data';
 import { DEFAULT_BRANCH_SLUG, BRANCHES, getBranchBySlug } from '@/lib/branches';
 
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest) {
           '6 months staff costs',
           '17 marketing spend records',
           '6 months transaction summaries',
+          '24 supply chain inventory items (Oils, Alcohol, Combiners, Accessories)',
+          '185 daily consumption records',
+          '3 historical supply orders',
         ],
       });
     }
@@ -60,6 +64,16 @@ export async function POST(req: NextRequest) {
     await db.capexItem.deleteMany({ where: { branchId: branch.id } });
     await db.overhead.deleteMany({ where: { branchId: branch.id } });
     await db.productSale.deleteMany({ where: { branchId: branch.id } });
+
+    // Clear supply chain data
+    const existingOrders = await db.supplyOrder.findMany({ where: { branchId: branch.id }, select: { id: true } });
+    const orderIds = existingOrders.map(o => o.id);
+    await db.supplyOrderLine.deleteMany({ where: { supplyOrderId: { in: orderIds } } });
+    await db.supplyOrder.deleteMany({ where: { branchId: branch.id } });
+    const existingSI = await db.supplyItem.findMany({ where: { branchId: branch.id }, select: { id: true } });
+    const siIds = existingSI.map(si => si.id);
+    await db.supplyConsumption.deleteMany({ where: { supplyItemId: { in: siIds } } });
+    await db.supplyItem.deleteMany({ where: { branchId: branch.id } });
 
     const existingPnl = await db.pnlPeriod.findMany({ where: { branchId: branch.id }, select: { id: true } });
     await db.pnlExpense.deleteMany({ where: { pnlPeriodId: { in: existingPnl.map(p => p.id) } } });
@@ -154,6 +168,73 @@ export async function POST(req: NextRequest) {
       });
     }
     results.transactions = await db.transactionSummary.count({ where: { monthlySale: { branchId: branch.id } } });
+
+    // ── Supply Chain: Inventory Items ──
+    for (const si of SEED_SUPPLY_ITEMS) {
+      await db.supplyItem.create({
+        data: {
+          ...si,
+          lastUpdated: new Date(),
+          branchId: branch.id,
+        },
+      });
+    }
+    results.supplyItems = await db.supplyItem.count({ where: { branchId: branch.id } });
+
+    // ── Supply Chain: Consumption Records ──
+    const itemMap = new Map<string, string>();
+    const allSupplyItems = await db.supplyItem.findMany({ where: { branchId: branch.id }, select: { itemId: true, id: true } });
+    for (const si of allSupplyItems) itemMap.set(si.itemId, si.id);
+
+    for (const c of SEED_SUPPLY_CONSUMPTIONS) {
+      const siId = itemMap.get(c.itemId);
+      if (siId) {
+        await db.supplyConsumption.create({
+          data: {
+            date: c.date,
+            qtyUsedL: c.qtyUsedL,
+            staffCode: c.staffCode,
+            transactionType: c.transactionType,
+            supplyItemId: siId,
+          },
+        });
+      }
+    }
+    results.supplyConsumptions = await db.supplyConsumption.count({
+      where: { supplyItem: { branchId: branch.id } },
+    });
+
+    // ── Supply Chain: Historical Orders ──
+    for (const order of SEED_SUPPLY_ORDERS) {
+      const so = await db.supplyOrder.create({
+        data: {
+          orderId: order.orderId,
+          branchId: branch.id,
+          branchName: branch.name,
+          deliveryRequested: order.deliveryRequested || null,
+          generatedBy: order.generatedBy,
+          orderTotalAED: order.lineItems.reduce((s: number, li: any) => s + li.lineTotalAED, 0),
+          status: order.status,
+          notes: order.notes || null,
+          lineItems: {
+            create: order.lineItems.map((li: any) => ({
+              itemId: li.itemId,
+              itemName: li.itemName,
+              category: li.category,
+              currentSohL: li.currentSohL,
+              orderQtyL: li.orderQtyL,
+              unitCostAED: li.unitCostAED,
+              lineTotalAED: li.lineTotalAED,
+              priority: li.priority,
+              supplierLeadDays: li.supplierLeadDays || 3,
+              urgent: li.urgent || false,
+              supplyItemId: itemMap.get(li.itemId) || null,
+            })),
+          },
+        },
+      });
+    }
+    results.supplyOrders = await db.supplyOrder.count({ where: { branchId: branch.id } });
 
     // ── Log upload ──
     await db.dataUpload.create({
