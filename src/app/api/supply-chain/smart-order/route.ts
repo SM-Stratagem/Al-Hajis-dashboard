@@ -70,10 +70,23 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       const totalConsumed30d = consumptionByItemId.get(item.id) || 0;
-      const avgDailyConsumption = totalConsumed30d / 30;
-      const daysRemaining = avgDailyConsumption > 0 ? item.currentQtyL / avgDailyConsumption : Infinity;
+      let avgDailyConsumption = totalConsumed30d / 30;
+      let daysRemaining: number;
+      let hasConsumptionData = avgDailyConsumption > 0;
 
-      // Determine stock status (same logic as inventory)
+      // If no consumption data, estimate from the gap between SOH and threshold
+      // Assume the item was at 2x threshold 30 days ago and depleted to current
+      if (!hasConsumptionData && item.minThresholdL > 0) {
+        const estimatedUsage30d = Math.max(0, (item.minThresholdL * 2) - item.currentQtyL);
+        avgDailyConsumption = estimatedUsage30d / 30;
+        daysRemaining = avgDailyConsumption > 0 ? item.currentQtyL / avgDailyConsumption : 999;
+      } else if (!hasConsumptionData) {
+        daysRemaining = 999;
+      } else {
+        daysRemaining = item.currentQtyL / avgDailyConsumption;
+      }
+
+      // Determine stock status — uses both consumption-based and threshold-based logic
       let stockStatus: 'CRITICAL' | 'LOW' | 'HEALTHY';
       if (daysRemaining <= 5 || item.currentQtyL < (item.minThresholdL * 0.3)) {
         stockStatus = 'CRITICAL';
@@ -87,19 +100,22 @@ export async function POST(req: NextRequest) {
       if (stockStatus === 'HEALTHY' && !includeHealthy) continue;
 
       // Step 4: Calculate order quantity
-      // orderQty = (avgDaily × 30 × safetyFactor) - currentSoh
-      const calculatedOrder = (avgDailyConsumption * 30 * safetyFactor) - item.currentQtyL;
-
-      // Skip if ≤ 0 (we have enough stock)
-      if (calculatedOrder <= 0) continue;
-
-      // Step 5: Cap at 45-day max stock
-      // maxOrder = (avgDaily × 45) - currentSoh
-      const maxOrder = (avgDailyConsumption * 45) - item.currentQtyL;
-      const cappedOrder = Math.min(calculatedOrder, maxOrder);
-
-      // Round up to nearest 0.5L
-      const orderQtyL = Math.ceil(cappedOrder * 2) / 2;
+      let orderQtyL: number;
+      if (hasConsumptionData) {
+        // orderQty = (avgDaily × 30 × safetyFactor) - currentSoh
+        const calculatedOrder = (avgDailyConsumption * 30 * safetyFactor) - item.currentQtyL;
+        // Skip if ≤ 0 (we have enough stock)
+        if (calculatedOrder <= 0) continue;
+        // Cap at 45-day max stock
+        const maxOrder = (avgDailyConsumption * 45) - item.currentQtyL;
+        const cappedOrder = Math.min(calculatedOrder, maxOrder);
+        orderQtyL = Math.ceil(cappedOrder * 2) / 2;
+      } else {
+        // No consumption data: order up to (minThreshold × 2) with safety factor
+        const targetStock = item.minThresholdL * 2 * safetyFactor;
+        const needed = Math.max(0, targetStock - item.currentQtyL);
+        orderQtyL = Math.ceil(needed * 2) / 2;
+      }
 
       if (orderQtyL <= 0) continue;
 
