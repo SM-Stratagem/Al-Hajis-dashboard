@@ -14,6 +14,7 @@ import {
   Store, Calculator, ClipboardList, ArrowRight, Upload, FileSpreadsheet, RefreshCw, Download,
   Megaphone, Gauge, Wallet, UserCheck, BadgeDollarSign, Timer, TrendingDown, Coins,
   Plug, Unplug, Radio, Cable, Settings, Info, Copy, Trash2, Plus, ToggleLeft, ToggleRight,
+  BookOpen, ChevronLeft,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════
@@ -5635,21 +5636,106 @@ function SupplyChainPage({ data }: { data: StoreData }) {
 // ══════════════════════════════════════════════════════════════════
 
 const CONNECTOR_TEMPLATES = [
-  { type: 'pos', system: 'magnati', label: 'Magnati POS', desc: 'Magnati (Network Intl) card terminal API', icon: '💳', color: '#1a73e8', fields: ['endpoint', 'apiKey', 'merchantId'] },
-  { type: 'pos', system: 'square', label: 'Square POS', desc: 'Square point-of-sale system', icon: '▣', color: '#006aff', fields: ['accessToken', 'locationId'] },
-  { type: 'pos', system: 'custom', label: 'Custom POS', desc: 'Any REST-based POS system', icon: '🖥️', color: T3, fields: ['endpoint', 'authHeader'] },
-  { type: 'erp', system: 'odoo', label: 'Odoo ERP', desc: 'Odoo inventory & sales modules', icon: '📦', color: '#714B67', fields: ['url', 'database', 'username', 'apiKey'] },
-  { type: 'erp', system: 'sap', label: 'SAP B1', desc: 'SAP Business One integration', icon: '🔵', color: '#0FAAFF', fields: ['endpoint', 'username', 'password'] },
-  { type: 'erp', system: 'zoho', label: 'Zoho Books', desc: 'Zoho inventory & financials', icon: '📊', color: '#D7282D', fields: ['clientId', 'clientSecret', 'orgId'] },
-  { type: 'google_sheets', system: 'google_sheets', label: 'Google Sheets', desc: 'Pull data from shared spreadsheets', icon: '📋', color: '#0F9D58', fields: ['spreadsheetId', 'apiKey', 'sheetName'] },
-  { type: 'webhook', system: 'webhook', label: 'Generic Webhook', desc: 'Receive POST webhooks from any system', icon: '🔗', color: GOLD, fields: ['authHeader'] },
+  { type: 'pos', system: 'magnati', label: 'Magnati POS', desc: 'Magnati (Network Intl) card terminal API', icon: '💳', color: '#1a73e8', fields: ['endpoint', 'apiKey', 'merchantId'], tier: 2, supportedCategories: ['sales', 'transactions'], direction: 'pull', setupGuide: 'Magnati POS Setup Guide',
+    setupSteps: [
+      'Log in to your Magnati Merchant Portal (portal.magnati.ae)',
+      'Navigate to API Settings → Generate API Key',
+      'Copy your Merchant ID from the dashboard',
+      'Note the API endpoint URL (usually provided by Magnati support)',
+      'Enter all three values in the config fields below',
+      'Click "Test Connection" to verify',
+      'Click "Sync Now" to pull card transaction data',
+      'Note: Magnati only provides CARD payments. Cash must be tracked separately via Google Sheets or manual entry.',
+    ],
+  },
+  { type: 'pos', system: 'square', label: 'Square POS', desc: 'Square point-of-sale system', icon: '▣', color: '#006aff', fields: ['accessToken', 'locationId'], tier: 2, supportedCategories: ['sales', 'transactions', 'inventory', 'products'], direction: 'pull', setupGuide: 'Square POS Setup Guide',
+    setupSteps: [
+      'Go to Square Developer Dashboard (developer.squareup.com)',
+      'Create a new application for your perfume business',
+      'Generate Personal Access Token or set up OAuth',
+      'Find your Location ID in Square Dashboard → Locations',
+      'Enter the Access Token and Location ID below',
+      'Click "Test Connection" to verify',
+      'Click "Sync Now" to pull sales, inventory, and product data',
+    ],
+  },
+  { type: 'pos', system: 'custom', label: 'Custom POS', desc: 'Any REST-based POS system', icon: '🖥️', color: T3, fields: ['endpoint', 'authHeader'], tier: 3, supportedCategories: ['sales', 'inventory', 'transactions', 'products', 'staff', 'expenses'], direction: 'pull', setupGuide: 'Custom POS Setup Guide',
+    setupSteps: [
+      'Ensure your POS system exposes a REST API',
+      'The API should return data in the Parfumix ingest format (see docs)',
+      'Enter the API endpoint URL',
+      'If auth is required, enter the Authorization header value',
+      'Supported endpoints: /sales, /inventory, /transactions, /products, /staff, /expenses',
+      'Click "Test Connection" to verify reachability',
+      'Click "Sync Now" to pull data',
+    ],
+  },
+  { type: 'erp', system: 'odoo', label: 'Odoo ERP', desc: 'Odoo inventory & sales modules', icon: '📦', color: '#714B67', fields: ['url', 'database', 'username', 'apiKey'], tier: 3, supportedCategories: ['sales', 'inventory', 'products', 'staff', 'expenses'], direction: 'pull', setupGuide: 'Odoo ERP Setup Guide',
+    setupSteps: [
+      'Enable External API in Odoo: Settings → General → External API',
+      'Create a dedicated API user with appropriate module permissions',
+      'Install relevant modules: sale, stock, purchase, hr, account',
+      'Enter your Odoo URL, Database name, Username, and API Key',
+      'Click "Test Connection" to verify authentication',
+      'Click "Sync Now" to pull data from all enabled modules',
+      'Recommended: sync inventory first, then sales, then staff/expenses',
+    ],
+  },
+  { type: 'erp', system: 'sap', label: 'SAP B1', desc: 'SAP Business One integration', icon: '🔵', color: '#0FAAFF', fields: ['endpoint', 'username', 'password'], tier: 3, supportedCategories: ['sales', 'inventory', 'products'], direction: 'pull', setupGuide: 'SAP B1 Setup Guide',
+    setupSteps: [
+      'Enable Service Layer in SAP B1: Administration → System Initialization → Service Layer',
+      'Create a dedicated API user with appropriate authorizations',
+      'Note the Service Layer URL (typically https://server:50001/b1s/v1)',
+      'Enter the endpoint URL, username, and password',
+      'Click "Test Connection" to verify',
+      'Click "Sync Now" to pull inventory and sales data',
+    ],
+  },
+  { type: 'erp', system: 'zoho', label: 'Zoho Books', desc: 'Zoho inventory & financials', icon: '📊', color: '#D7282D', fields: ['clientId', 'clientSecret', 'orgId', 'accessToken'], tier: 3, supportedCategories: ['sales', 'inventory', 'products', 'expenses'], direction: 'pull', setupGuide: 'Zoho Setup Guide',
+    setupSteps: [
+      'Go to Zoho Developer Console (developer.zoho.com)',
+      'Create a Self-Client application',
+      'Generate access/refresh tokens via the authorization flow',
+      'Find your Organization ID in Zoho Books → Settings',
+      'Enter Client ID, Client Secret, Org ID, and Access Token',
+      'Click "Test Connection" to verify',
+      'Note: Access tokens expire. You may need to refresh periodically.',
+    ],
+  },
+  { type: 'google_sheets', system: 'google_sheets', label: 'Google Sheets', desc: 'Pull data from shared spreadsheets', icon: '📋', color: '#0F9D58', fields: ['spreadsheetId', 'apiKey', 'sheetName'], tier: 1, supportedCategories: ['sales', 'inventory', 'consumption', 'transactions', 'products', 'staff', 'expenses'], direction: 'pull', setupGuide: 'Google Sheets Setup Guide (Recommended First Step)',
+    setupSteps: [
+      'Go to Google Cloud Console (console.cloud.google.com)',
+      'Create a project or use existing one',
+      'Enable Google Sheets API: APIs & Services → Library → Sheets API → Enable',
+      'Create API Key: APIs & Services → Credentials → Create Credentials → API Key',
+      'Restrict the API key to Google Sheets API only',
+      'Create a Google Sheet with these tabs: Sales, Inventory, Products, Staff, Expenses',
+      'Share the spreadsheet: Click Share → "Anyone with the link" → Viewer',
+      'Copy the Sheet ID from the URL: docs.google.com/spreadsheets/d/{SHEET_ID}/edit',
+      'Enter the Sheet ID, API Key, and tab name below',
+      'Click "Test Connection" to verify and see available tabs',
+      'Click "Sync Now" to pull data into the dashboard',
+    ],
+  },
+  { type: 'webhook', system: 'webhook', label: 'Generic Webhook', desc: 'Receive POST webhooks from any system', icon: '🔗', color: GOLD, fields: ['authHeader', 'defaultBranchSlug'], tier: 1, supportedCategories: ['sales', 'inventory', 'consumption', 'transactions', 'products', 'staff', 'expenses'], direction: 'push', setupGuide: 'Webhook Setup Guide',
+    setupSteps: [
+      'Create a new webhook connector below',
+      'Optionally set an auth header for security (any POST must include it)',
+      'Set the default branch slug (e.g., "adcb") if all data goes to one branch',
+      'After creating, copy the Webhook URL shown on the connector detail page',
+      'Configure your POS/ERP to POST data to that URL',
+      'Supported payload format: { "type": "sales", "data": { "sales": [...] } }',
+      'Types: sales, inventory, transactions, products, staff, expenses',
+      'Each webhook push is logged in the sync history',
+    ],
+  },
 ];
 
 function IntegrationsPage() {
   const [connectors, setConnectors] = useState<any[]>([]);
   const [syncLogs, setSyncLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeView, setActiveView] = useState<'overview' | 'add' | 'detail'>('overview');
+  const [activeView, setActiveView] = useState<'overview' | 'add' | 'detail' | 'setup'>('overview');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedConnector, setSelectedConnector] = useState<any>(null);
 
@@ -5661,6 +5747,17 @@ function IntegrationsPage() {
   const [formConfig, setFormConfig] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // Setup guide state
+  const [setupTemplate, setSetupTemplate] = useState<typeof CONNECTOR_TEMPLATES[number] | null>(null);
+
+  // Sync state
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<any>(null);
+  const [syncCategory, setSyncCategory] = useState('sales');
+
+  // Test result state
+  const [testResult, setTestResult] = useState<any>(null);
 
   const branchSlug = useMemo(() => {
     try { const v = JSON.parse(localStorage.getItem(BRANCH_LS_KEY) || '{}'); if (v.type === 'branch' && v.slug) return v.slug; } catch {}
@@ -5723,14 +5820,36 @@ function IntegrationsPage() {
     finally { setSaving(false); }
   };
 
-  // Test connector
+  // Test connector (store result in state)
   const handleTest = async (id: string) => {
+    setTestResult(null);
     try {
       const res = await fetch(`/api/connectors/${id}/test`, { method: 'POST' });
       const data = await res.json();
+      setTestResult(data);
       setToast(data.message || (data.success ? 'Connection test passed!' : 'Connection test failed'));
       loadConnectors();
-    } catch { setToast('Test failed'); }
+    } catch { setTestResult({ success: false, message: 'Network error' }); setToast('Test failed'); }
+  };
+
+  // Sync connector
+  const handleSync = async () => {
+    if (!selectedConnector) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/connectors/${selectedConnector.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: syncCategory }),
+      });
+      const data = await res.json();
+      setSyncResult(data);
+      setToast(data.message || (data.success ? 'Sync completed!' : 'Sync failed'));
+      loadConnectors();
+      if (selectedId) loadDetail(selectedId);
+    } catch { setSyncResult({ success: false, message: 'Sync error' }); setToast('Sync failed'); }
+    finally { setSyncing(false); }
   };
 
   // Toggle connector
@@ -5765,10 +5884,27 @@ function IntegrationsPage() {
       setSyncLogs(data.connector.syncLogs || []);
       setSelectedId(id);
       setActiveView('detail');
+      setTestResult(null);
+      setSyncResult(null);
     } catch { setToast('Failed to load connector detail'); }
   };
 
   const webhookBaseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
+  // ── TierBadge helper ──
+  const TierBadge = ({ tier }: { tier: number }) => {
+    const colors: Record<number, { bg: string; color: string; label: string }> = {
+      1: { bg: `${SAGE}22`, color: SAGE, label: 'T1 Simple' },
+      2: { bg: `${AMBER}22`, color: AMBER, label: 'T2 Standard' },
+      3: { bg: `${ROSE}22`, color: ROSE, label: 'T3 Advanced' },
+    };
+    const cfg = colors[tier] || colors[1];
+    return (
+      <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 8, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
+        {cfg.label}
+      </span>
+    );
+  };
 
   // ── Toast banner ──
   const toastBanner = toast ? (
@@ -5786,18 +5922,24 @@ function IntegrationsPage() {
       {/* ── OVERVIEW VIEW ── */}
       {activeView === 'overview' && (
         <div>
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-4 gap-3 mb-4">
             <KpiCard label="Connected Systems" value={`${connectors.filter(c => c.enabled).length}`} sub={`${connectors.length} total connectors`} badge={connectors.some(c => c.enabled) ? 'LIVE' : 'NONE'} badgeColor={connectors.some(c => c.enabled) ? SAGE : T3} />
+            <KpiCard label="Data Sources" value={`${new Set(connectors.map(c => c.type)).size}`} sub={`${new Set(connectors.map(c => c.system)).size} unique systems`} />
             <KpiCard label="Total Syncs" value={connectors.reduce((s: number, c: any) => s + (c._count?.syncLogs || 0), 0).toLocaleString()} sub="All time" />
-            <KpiCard label="API Endpoints" value="3" sub="Ingest + Webhook + Test" badge="Ready" badgeColor={SAGE} />
+            <KpiCard label="Integration Tier" value={connectors.length > 0 ? `T${Math.max(...connectors.map(c => CONNECTOR_TEMPLATES.find(t => t.system === c.system)?.tier || 1))}` : '—'} sub={connectors.length > 0 ? 'Highest connected tier' : 'No connectors yet'} badge={connectors.some(c => { const t = CONNECTOR_TEMPLATES.find(x => x.system === c.system); return t && t.tier >= 3; }) ? 'Advanced' : connectors.some(c => { const t = CONNECTOR_TEMPLATES.find(x => x.system === c.system); return t && t.tier >= 2; }) ? 'Standard' : 'Basic'} badgeColor={connectors.some(c => { const t = CONNECTOR_TEMPLATES.find(x => x.system === c.system); return t && t.tier >= 3; }) ? ROSE : connectors.some(c => { const t = CONNECTOR_TEMPLATES.find(x => x.system === c.system); return t && t.tier >= 2; }) ? AMBER : SAGE} />
           </div>
 
           <ChartCard title="Registered Connectors" wide>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ fontSize: 11, color: T2 }}>Connect your POS, ERP, or any system to push data directly</div>
-              <button onClick={() => setActiveView('add')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${GOLD}33`, background: `${GOLD}15`, color: GOLD, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
-                <Plus size={13} /> Add Connector
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => { setSetupTemplate(null); setActiveView('setup'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${STEEL}33`, background: `${STEEL}15`, color: STEEL, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                  <BookOpen size={13} /> View Setup Guides
+                </button>
+                <button onClick={() => setActiveView('add')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${GOLD}33`, background: `${GOLD}15`, color: GOLD, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                  <Plus size={13} /> Add Connector
+                </button>
+              </div>
             </div>
 
             {connectors.length === 0 ? (
@@ -5805,9 +5947,14 @@ function IntegrationsPage() {
                 <Cable size={32} style={{ color: T3, marginBottom: 12 }} />
                 <div style={{ fontSize: 13, color: T2, marginBottom: 6 }}>No connectors configured yet</div>
                 <div style={{ fontSize: 11, color: T3, marginBottom: 16 }}>Connect your POS, ERP, or any external system to start pushing real data</div>
-                <button onClick={() => setActiveView('add')} style={{ padding: '8px 18px', borderRadius: 6, border: `1px solid ${GOLD}33`, background: `${GOLD}12`, color: GOLD, fontSize: 11, cursor: 'pointer' }}>
-                  <Plus size={13} style={{ display: 'inline', verticalAlign: -2, marginRight: 4 }} /> Add Your First Connector
-                </button>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                  <button onClick={() => { setSetupTemplate(null); setActiveView('setup'); }} style={{ padding: '8px 18px', borderRadius: 6, border: `1px solid ${STEEL}33`, background: `${STEEL}12`, color: STEEL, fontSize: 11, cursor: 'pointer' }}>
+                    <BookOpen size={13} style={{ display: 'inline', verticalAlign: -2, marginRight: 4 }} /> View Setup Guides
+                  </button>
+                  <button onClick={() => setActiveView('add')} style={{ padding: '8px 18px', borderRadius: 6, border: `1px solid ${GOLD}33`, background: `${GOLD}12`, color: GOLD, fontSize: 11, cursor: 'pointer' }}>
+                    <Plus size={13} style={{ display: 'inline', verticalAlign: -2, marginRight: 4 }} /> Add Your First Connector
+                  </button>
+                </div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -5820,7 +5967,11 @@ function IntegrationsPage() {
                         {template?.icon || '🔌'}
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: T1, fontWeight: 500 }}>{conn.name}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, color: T1, fontWeight: 500 }}>{conn.name}</span>
+                          {template && <TierBadge tier={template.tier} />}
+                          {template && <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, background: `${template.direction === 'push' ? AMBER : STEEL}22`, color: template.direction === 'push' ? AMBER : STEEL, fontWeight: 600 }}>{template.direction.toUpperCase()}</span>}
+                        </div>
                         <div style={{ fontSize: 10, color: T3, marginTop: 2 }}>
                           {template?.label || conn.system} &middot; {conn.branch?.name || 'All branches'} &middot; {conn._count?.syncLogs || 0} syncs
                           {conn.lastSyncAt && <span> &middot; Last: {new Date(conn.lastSyncAt).toLocaleDateString()}</span>}
@@ -5870,13 +6021,87 @@ function IntegrationsPage() {
         </div>
       )}
 
+      {/* ── SETUP GUIDES VIEW ── */}
+      {activeView === 'setup' && (
+        <div>
+          <ChartCard title="Integration Setup Guides" wide>
+            <button onClick={() => setActiveView('overview')} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 10, cursor: 'pointer', marginBottom: 16 }}>
+              <ChevronLeft size={12} /> Back to Connectors
+            </button>
+
+            {!setupTemplate ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {CONNECTOR_TEMPLATES.map(t => (
+                  <div key={t.system} onClick={() => setSetupTemplate(t)} style={{ padding: 16, borderRadius: 10, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.015)', cursor: 'pointer', transition: 'border-color 0.15s', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: `${t.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                      {t.icon}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: T1, fontWeight: 600 }}>{t.label}</span>
+                        <TierBadge tier={t.tier} />
+                        <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, background: `${t.direction === 'push' ? AMBER : STEEL}22`, color: t.direction === 'push' ? AMBER : STEEL, fontWeight: 600 }}>{t.direction.toUpperCase()}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: T3, marginBottom: 6 }}>{t.desc}</div>
+                      <div style={{ fontSize: 9, color: T2 }}>
+                        Categories: {t.supportedCategories.join(', ')}
+                      </div>
+                      <div style={{ fontSize: 9, color: T2, marginTop: 2 }}>
+                        {t.setupSteps.length} setup steps
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <button onClick={() => setSetupTemplate(null)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 10, cursor: 'pointer', marginBottom: 16 }}>
+                  <ChevronLeft size={12} /> All Guides
+                </button>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: `${setupTemplate.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
+                    {setupTemplate.icon}
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 16, color: T1, fontWeight: 700 }}>{setupTemplate.setupGuide}</span>
+                      <TierBadge tier={setupTemplate.tier} />
+                    </div>
+                    <div style={{ fontSize: 10, color: T3, marginTop: 2 }}>{setupTemplate.desc} &middot; Direction: {setupTemplate.direction.toUpperCase()} &middot; Categories: {setupTemplate.supportedCategories.join(', ')}</div>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 12 }}>Step-by-Step Setup</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {setupTemplate.setupSteps.map((step, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 14px', borderRadius: 8, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.015)' }}>
+                        <div style={{ width: 24, height: 24, borderRadius: 6, background: `${setupTemplate.color}22`, color: setupTemplate.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                          {i + 1}
+                        </div>
+                        <div style={{ fontSize: 11, color: T1, lineHeight: 1.5 }}>{step}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <button onClick={() => { setFormType(setupTemplate.type); setFormSystem(setupTemplate.system); setSetupTemplate(null); setActiveView('add'); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 8, border: 'none', background: GOLD, color: '#000', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                  <Plus size={14} /> Set Up {setupTemplate.label}
+                </button>
+              </div>
+            )}
+          </ChartCard>
+        </div>
+      )}
+
       {/* ── ADD CONNECTOR VIEW ── */}
       {activeView === 'add' && (
         <div>
           <ChartCard title="Add New Connector" wide>
             <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
               <button onClick={() => setActiveView('overview')} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 10, cursor: 'pointer' }}>
-                ← Back
+                <ChevronLeft size={12} /> Back
               </button>
             </div>
 
@@ -5894,13 +6119,21 @@ function IntegrationsPage() {
 
             {/* System selector */}
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 8 }}>System</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2 }}>System</div>
+                <button onClick={() => { setSetupTemplate(null); setActiveView('setup'); }} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, border: `1px solid ${STEEL}33`, background: `${STEEL}12`, color: STEEL, fontSize: 9, cursor: 'pointer', fontWeight: 500 }}>
+                  <BookOpen size={11} /> Setup Guide
+                </button>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {templates.map(t => (
                   <button key={t.system} onClick={() => setFormSystem(t.system)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 8, border: `1px solid ${formSystem === t.system ? `${t.color}55` : BORDER}`, background: formSystem === t.system ? `${t.color}12` : 'transparent', color: formSystem === t.system ? T1 : T2, fontSize: 11, cursor: 'pointer', textAlign: 'left', minWidth: 180 }}>
                     <span style={{ fontSize: 18 }}>{t.icon}</span>
                     <div>
-                      <div style={{ fontWeight: 500 }}>{t.label}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontWeight: 500 }}>{t.label}</span>
+                        <TierBadge tier={t.tier} />
+                      </div>
                       <div style={{ fontSize: 9, color: T3, marginTop: 1 }}>{t.desc}</div>
                     </div>
                   </button>
@@ -5948,42 +6181,128 @@ function IntegrationsPage() {
         <div>
           <ChartCard title="Connector Details" wide>
             <button onClick={() => setActiveView('overview')} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 10, cursor: 'pointer', marginBottom: 16 }}>
-              ← All Connectors
+              <ChevronLeft size={12} /> All Connectors
             </button>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: `${CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system)?.color || T3}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-                    {CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system)?.icon || '🔌'}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 14, color: T1, fontWeight: 600 }}>{selectedConnector.name}</div>
-                    <div style={{ fontSize: 10, color: T3 }}>
-                      {CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system)?.label || selectedConnector.system} &middot;
-                      {selectedConnector.type} &middot;
-                      {selectedConnector.branch?.name || 'All branches'}
+            {(() => {
+              const detailTemplate = CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system);
+              return (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                        <div style={{ width: 40, height: 40, borderRadius: 10, background: `${detailTemplate?.color || T3}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                          {detailTemplate?.icon || '🔌'}
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 14, color: T1, fontWeight: 600 }}>{selectedConnector.name}</span>
+                            {detailTemplate && <TierBadge tier={detailTemplate.tier} />}
+                            {detailTemplate && <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, background: `${detailTemplate.direction === 'push' ? AMBER : STEEL}22`, color: detailTemplate.direction === 'push' ? AMBER : STEEL, fontWeight: 600 }}>{detailTemplate.direction.toUpperCase()}</span>}
+                          </div>
+                          <div style={{ fontSize: 10, color: T3, marginTop: 2 }}>
+                            {detailTemplate?.label || selectedConnector.system} &middot;
+                            {selectedConnector.type} &middot;
+                            {selectedConnector.branch?.name || 'All branches'}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button onClick={() => handleToggle(selectedConnector)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${selectedConnector.enabled ? SAGE : BORDER}`, background: selectedConnector.enabled ? `${SAGE}15` : 'transparent', color: selectedConnector.enabled ? SAGE : T2, fontSize: 11, cursor: 'pointer' }}>
+                          {selectedConnector.enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                          {selectedConnector.enabled ? 'Enabled' : 'Disabled'}
+                        </button>
+                        <button onClick={() => handleTest(selectedConnector.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 11, cursor: 'pointer' }}>
+                          <Radio size={13} /> Test Connection
+                        </button>
+                        {detailTemplate && detailTemplate.direction === 'pull' && (
+                          <button onClick={handleSync} disabled={syncing} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${SAGE}55`, background: `${SAGE}15`, color: SAGE, fontSize: 11, cursor: syncing ? 'not-allowed' : 'pointer', fontWeight: 500 }}>
+                            <RefreshCw size={13} style={syncing ? { animation: 'spin 1s linear infinite' } : undefined} />
+                            {syncing ? 'Syncing...' : 'Sync Now'}
+                          </button>
+                        )}
+                        {detailTemplate && (
+                          <button onClick={() => { setSetupTemplate(detailTemplate); setActiveView('setup'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${STEEL}33`, background: `${STEEL}12`, color: STEEL, fontSize: 11, cursor: 'pointer' }}>
+                            <BookOpen size={13} /> Guide
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ padding: 14, borderRadius: 8, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.01)' }}>
+                      <div style={{ fontSize: 9, color: T3, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Webhook URL</div>
+                      <code style={{ fontSize: 9, color: GOLD, wordBreak: 'break-all', display: 'block' }}>{webhookBaseUrl}/api/webhook/{selectedConnector.id}</code>
+                      <button onClick={() => { navigator.clipboard?.writeText(`${webhookBaseUrl}/api/webhook/${selectedConnector.id}`); setToast('Webhook URL copied!'); }} style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 9, cursor: 'pointer' }}>
+                        <Copy size={10} /> Copy URL
+                      </button>
                     </div>
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => handleToggle(selectedConnector)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${selectedConnector.enabled ? SAGE : BORDER}`, background: selectedConnector.enabled ? `${SAGE}15` : 'transparent', color: selectedConnector.enabled ? SAGE : T2, fontSize: 11, cursor: 'pointer' }}>
-                    {selectedConnector.enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
-                    {selectedConnector.enabled ? 'Enabled' : 'Disabled'}
-                  </button>
-                  <button onClick={() => handleTest(selectedConnector.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 11, cursor: 'pointer' }}>
-                    <Radio size={13} /> Test Connection
-                  </button>
-                </div>
-              </div>
-              <div style={{ padding: 14, borderRadius: 8, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.01)' }}>
-                <div style={{ fontSize: 9, color: T3, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Webhook URL</div>
-                <code style={{ fontSize: 9, color: GOLD, wordBreak: 'break-all', display: 'block' }}>{webhookBaseUrl}/api/webhook/{selectedConnector.id}</code>
-                <button onClick={() => { navigator.clipboard?.writeText(`${webhookBaseUrl}/api/webhook/${selectedConnector.id}`); setToast('Webhook URL copied!'); }} style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 9, cursor: 'pointer' }}>
-                  <Copy size={10} /> Copy URL
-                </button>
-              </div>
-            </div>
+
+                  {/* Test result display */}
+                  {testResult && (
+                    <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 8, border: `1px solid ${testResult.success ? `${SAGE}44` : `${ROSE}44`}`, background: testResult.success ? `${SAGE}08` : `${ROSE}08` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: testResult.details ? 8 : 0 }}>
+                        {testResult.success ? (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 4, background: `${SAGE}22`, color: SAGE, fontSize: 10, fontWeight: 700 }}>
+                            <CheckCircle2 size={12} /> PASS
+                          </span>
+                        ) : (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 4, background: `${ROSE}22`, color: ROSE, fontSize: 10, fontWeight: 700 }}>
+                            <XCircle size={12} /> FAIL
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: T1 }}>{testResult.message || (testResult.success ? 'Connection successful' : 'Connection failed')}</span>
+                      </div>
+                      {testResult.details && (
+                        <pre style={{ fontSize: 9, color: T3, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, maxHeight: 100, overflowY: 'auto' }}>{typeof testResult.details === 'string' ? testResult.details : JSON.stringify(testResult.details, null, 2)}</pre>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sync category selector + result (pull only) */}
+                  {detailTemplate && detailTemplate.direction === 'pull' && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2 }}>Sync Category</div>
+                        <select value={syncCategory} onChange={e => setSyncCategory(e.target.value)} style={{ padding: '5px 10px', borderRadius: 5, border: `1px solid ${BORDER}`, background: CARD_BG, color: T1, fontSize: 10, outline: 'none', fontFamily: 'inherit' }}>
+                          {detailTemplate.supportedCategories.map(cat => (
+                            <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {syncResult && (
+                        <div style={{ padding: '12px 14px', borderRadius: 8, border: `1px solid ${syncResult.success ? `${SAGE}44` : `${ROSE}44`}`, background: syncResult.success ? `${SAGE}08` : `${ROSE}08` }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {syncResult.success ? (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 4, background: `${SAGE}22`, color: SAGE, fontSize: 10, fontWeight: 700 }}>
+                                <CheckCircle2 size={12} /> SYNC OK
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 4, background: `${ROSE}22`, color: ROSE, fontSize: 10, fontWeight: 700 }}>
+                                <XCircle size={12} /> SYNC FAILED
+                              </span>
+                            )}
+                            <span style={{ fontSize: 11, color: T1 }}>{syncResult.message || (syncResult.success ? 'Sync completed' : 'Sync failed')}</span>
+                            {syncResult.recordCount !== undefined && <span style={{ fontSize: 10, color: T3 }}>({syncResult.recordCount} records)</span>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Supported categories display */}
+                  {detailTemplate && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 6 }}>Supported Categories</div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {detailTemplate.supportedCategories.map(cat => (
+                          <span key={cat} style={{ padding: '2px 8px', borderRadius: 4, fontSize: 9, background: 'rgba(255,255,255,0.04)', color: T2, border: `1px solid ${BORDER}` }}>{cat}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Config display */}
             <div style={{ marginBottom: 20 }}>

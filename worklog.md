@@ -280,3 +280,44 @@ Stage Summary:
 - Smart ordering logic implements all 5 steps from the spec (avg daily consumption, days remaining, CRITICAL/LOW/HEALTHY flags, order qty with safety factor, 45-day max cap)
 - All monetary values in AED, all volumes in Litres (L)
 - Server running on port 3000, page loads at 200/40KB, lint passes clean
+---
+Task ID: 9
+Agent: main
+Task: Build POS/ERP connector framework for direct system integration
+
+Work Log:
+- Created connector driver framework at `/src/lib/connectors/`:
+  - `types.ts` — Abstract IConnectorDriver interface with testConnection(), pullData(), DataCategory union type, and typed record shapes (SalesRecord, InventoryRecord, etc.)
+  - `registry.ts` — Central registry mapping system IDs to driver implementations, with getDriver(), listDrivers(), registerDriver() functions
+- Implemented 8 connector drivers:
+  - `magnati-pos.ts` — Magnati (Network Intl) card terminal API. Pulls card transactions, aggregates by date. Documents limitations (card-only, no SKU/cash/staff).
+  - `google-sheets.ts` — Google Sheets v4 API. Full parser for 7 data categories with flexible column detection, multiple date format parsing, and tab-aware pulling. MVP tier.
+  - `square-pos.ts` — Square POS API v2. Pulls payments, inventory counts, item catalog. Handles cent-to-dollar conversion.
+  - `custom-pos.ts` — Generic REST connector. Expects Parfumix-compatible response format at /{category} endpoints.
+  - `odoo-erp.ts` — Odoo via JSON-RPC. Auth via /web/session/authenticate, search_read for inventory, sales orders, products, payslips, expenses.
+  - `sap-erp.ts` — SAP B1 Service Layer (REST). Login/logout, OData queries for items, orders, inventory.
+  - `zoho-erp.ts` — Zoho Books/Inventory API. Invoices, inventory items, products, expenses.
+  - `generic-webhook.ts` — Passive webhook receiver. Validates config, provides guidance. Data received via /api/webhook/[id].
+- Created API routes:
+  - `/api/connectors/[id]/test/route.ts` — Uses registry to find driver, runs testConnection(), logs result, updates connector status
+  - `/api/connectors/[id]/sync/route.ts` — Pull sync engine: finds driver, pulls data by category, writes to DB via writePullResultToDb helper, handles multi-category sync, logs per-category, fires data-changed event
+- Enhanced IntegrationsPage UI:
+  - Added Setup Guide view with step-by-step instructions for each system
+  - Added Sync Now button with category selector for pull-direction connectors
+  - Added test result display with pass/fail badge, latency, and details
+  - Added sync result display with per-category breakdown
+  - Added tier badges (MVP/Tier 2/Tier 3) throughout
+  - Added direction badges (PULL/PUSH)
+  - Added Integration Tiers overview card (3 tiers with descriptions)
+  - Enhanced API endpoints reference (5 endpoints listed)
+  - Added "Start with Google Sheets" quick-start button in empty state
+- Fixed existing bug: duplicate closing brace in webhook route
+- Updated CONNECTOR_TEMPLATES with tier, supportedCategories, direction, setupGuide, setupSteps fields
+- Lint passes clean (0 errors)
+
+Stage Summary:
+- Complete connector driver framework with 8 system drivers
+- Pull sync engine with multi-category support and DB persistence
+- Enhanced UI with setup guides, sync controls, tier badges, and detailed status
+- Ready for user to connect actual POS/ERP systems
+- User said "later on ill show you how" — framework is extensible, new systems can be added by creating a driver file + registering in registry.ts

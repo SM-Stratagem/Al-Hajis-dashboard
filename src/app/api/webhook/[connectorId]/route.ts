@@ -153,8 +153,6 @@ export async function POST(
           }
         }
 
-        }
-
         summary = `${recordCount} sales records from webhook`;
         break;
       }
