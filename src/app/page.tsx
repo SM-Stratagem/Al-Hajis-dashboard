@@ -13,6 +13,7 @@ import {
   CheckCircle2, XCircle, AlertCircle, Users, Package, BarChart2, Receipt,
   Store, Calculator, ClipboardList, ArrowRight, Upload, FileSpreadsheet, RefreshCw, Download,
   Megaphone, Gauge, Wallet, UserCheck, BadgeDollarSign, Timer, TrendingDown, Coins,
+  Plug, Unplug, Radio, Cable, Settings, Info, Copy, Trash2, Plus, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════
@@ -566,7 +567,7 @@ function ChartCard({ title, children, wide }: { title?: string; children: React.
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
 // ══════════════════════════════════════════════════════════════════
-type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'supply-chain' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'daily-ops' | 'cash-flow' | 'customers' | 'data-center';
+type PageId = 'dashboard' | 'alerts' | 'pnl' | 'capex' | 'payback' | 'breakeven' | 'revenue' | 'heatmap' | 'weekly' | 'returns' | 'payments' | 'supply-chain' | 'forecast' | 'simulator' | 'gaps' | 'products' | 'staff' | 'marketing' | 'daily-ops' | 'cash-flow' | 'customers' | 'integrations' | 'data-center';
 
 const navSections = [
   {
@@ -623,6 +624,7 @@ const navSections = [
   {
     title: 'System',
     items: [
+      { id: 'integrations' as PageId, label: 'Integrations', icon: Plug, badge: 'API' },
       { id: 'data-center' as PageId, label: 'Data Center', icon: Upload, badge: 'NEW' },
     ],
   },
@@ -5629,8 +5631,405 @@ function SupplyChainPage({ data }: { data: StoreData }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// MAIN PAGE COMPONENT
+// PAGE: INTEGRATIONS (POS/ERP CONNECTORS)
 // ══════════════════════════════════════════════════════════════════
+
+const CONNECTOR_TEMPLATES = [
+  { type: 'pos', system: 'magnati', label: 'Magnati POS', desc: 'Magnati (Network Intl) card terminal API', icon: '💳', color: '#1a73e8', fields: ['endpoint', 'apiKey', 'merchantId'] },
+  { type: 'pos', system: 'square', label: 'Square POS', desc: 'Square point-of-sale system', icon: '▣', color: '#006aff', fields: ['accessToken', 'locationId'] },
+  { type: 'pos', system: 'custom', label: 'Custom POS', desc: 'Any REST-based POS system', icon: '🖥️', color: T3, fields: ['endpoint', 'authHeader'] },
+  { type: 'erp', system: 'odoo', label: 'Odoo ERP', desc: 'Odoo inventory & sales modules', icon: '📦', color: '#714B67', fields: ['url', 'database', 'username', 'apiKey'] },
+  { type: 'erp', system: 'sap', label: 'SAP B1', desc: 'SAP Business One integration', icon: '🔵', color: '#0FAAFF', fields: ['endpoint', 'username', 'password'] },
+  { type: 'erp', system: 'zoho', label: 'Zoho Books', desc: 'Zoho inventory & financials', icon: '📊', color: '#D7282D', fields: ['clientId', 'clientSecret', 'orgId'] },
+  { type: 'google_sheets', system: 'google_sheets', label: 'Google Sheets', desc: 'Pull data from shared spreadsheets', icon: '📋', color: '#0F9D58', fields: ['spreadsheetId', 'apiKey', 'sheetName'] },
+  { type: 'webhook', system: 'webhook', label: 'Generic Webhook', desc: 'Receive POST webhooks from any system', icon: '🔗', color: GOLD, fields: ['authHeader'] },
+];
+
+function IntegrationsPage() {
+  const [connectors, setConnectors] = useState<any[]>([]);
+  const [syncLogs, setSyncLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<'overview' | 'add' | 'detail'>('overview');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedConnector, setSelectedConnector] = useState<any>(null);
+
+  // Add connector form state
+  const [formType, setFormType] = useState('pos');
+  const [formSystem, setFormSystem] = useState('magnati');
+  const [formName, setFormName] = useState('');
+  const [formBranch, setFormBranch] = useState('');
+  const [formConfig, setFormConfig] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const branchSlug = useMemo(() => {
+    try { const v = JSON.parse(localStorage.getItem(BRANCH_LS_KEY) || '{}'); if (v.type === 'branch' && v.slug) return v.slug; } catch {}
+    return DEFAULT_BRANCH_SLUG;
+  }, []);
+
+  // Load connectors
+  const loadConnectors = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/connectors');
+      const data = await res.json();
+      setConnectors(data.connectors || []);
+    } catch (e) { console.error('Failed to load connectors:', e); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadConnectors(); }, []);
+
+  // Toast auto-dismiss
+  useEffect(() => {
+    if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t); }
+  }, [toast]);
+
+  // System templates filtered by type
+  const templates = CONNECTOR_TEMPLATES.filter(t => t.type === formType);
+  const selectedTemplate = CONNECTOR_TEMPLATES.find(t => t.system === formSystem);
+
+  // When system changes, reset config fields
+  useEffect(() => {
+    if (selectedTemplate) {
+      const newConfig: Record<string, string> = {};
+      selectedTemplate.fields.forEach(f => { newConfig[f] = formConfig[f] || ''; });
+      setFormConfig(newConfig);
+      if (!formName) setFormName(`${selectedTemplate.label} — ${BRANCHES.find(b => b.slug === (formBranch || branchSlug))?.name || 'Branch'}`);
+    }
+  }, [formSystem]);
+
+  // Create connector
+  const handleCreate = async () => {
+    if (!formName || !formSystem) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: formName, type: formType, system: formSystem, branchSlug: formBranch || branchSlug, config: formConfig }),
+      });
+      const data = await res.json();
+      if (data.connector) {
+        setToast(`Connector "${formName}" created!`);
+        setFormName('');
+        setFormConfig({});
+        setActiveView('overview');
+        loadConnectors();
+      } else {
+        setToast(data.error || 'Failed to create connector');
+      }
+    } catch { setToast('Error creating connector'); }
+    finally { setSaving(false); }
+  };
+
+  // Test connector
+  const handleTest = async (id: string) => {
+    try {
+      const res = await fetch(`/api/connectors/${id}/test`, { method: 'POST' });
+      const data = await res.json();
+      setToast(data.message || (data.success ? 'Connection test passed!' : 'Connection test failed'));
+      loadConnectors();
+    } catch { setToast('Test failed'); }
+  };
+
+  // Toggle connector
+  const handleToggle = async (conn: any) => {
+    try {
+      await fetch(`/api/connectors/${conn.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !conn.enabled }),
+      });
+      loadConnectors();
+    } catch { setToast('Failed to toggle connector'); }
+  };
+
+  // Delete connector
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this connector and all sync logs?')) return;
+    try {
+      await fetch(`/api/connectors/${id}`, { method: 'DELETE' });
+      setToast('Connector deleted');
+      loadConnectors();
+      if (selectedId === id) { setSelectedId(null); setSelectedConnector(null); setActiveView('overview'); }
+    } catch { setToast('Failed to delete'); }
+  };
+
+  // Load connector detail + logs
+  const loadDetail = async (id: string) => {
+    try {
+      const res = await fetch(`/api/connectors/${id}`);
+      const data = await res.json();
+      setSelectedConnector(data.connector);
+      setSyncLogs(data.connector.syncLogs || []);
+      setSelectedId(id);
+      setActiveView('detail');
+    } catch { setToast('Failed to load connector detail'); }
+  };
+
+  const webhookBaseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
+  // ── Toast banner ──
+  const toastBanner = toast ? (
+    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999, padding: '10px 18px', borderRadius: 8, background: toast.includes('failed') || toast.includes('Failed') || toast.includes('Error') ? `${ROSE}22` : `${SAGE}22`, border: `1px solid ${toast.includes('failed') || toast.includes('Failed') ? ROSE : SAGE}`, color: toast.includes('failed') || toast.includes('Failed') ? ROSE : SAGE, fontSize: 11, fontWeight: 500, maxWidth: 400 }}>
+      {toast}
+    </div>
+  ) : null;
+
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><RefreshCw size={20} style={{ color: GOLD, animation: 'spin 1s linear infinite' }} /></div>;
+
+  return (
+    <div>
+      {toastBanner}
+
+      {/* ── OVERVIEW VIEW ── */}
+      {activeView === 'overview' && (
+        <div>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <KpiCard label="Connected Systems" value={`${connectors.filter(c => c.enabled).length}`} sub={`${connectors.length} total connectors`} badge={connectors.some(c => c.enabled) ? 'LIVE' : 'NONE'} badgeColor={connectors.some(c => c.enabled) ? SAGE : T3} />
+            <KpiCard label="Total Syncs" value={connectors.reduce((s: number, c: any) => s + (c._count?.syncLogs || 0), 0).toLocaleString()} sub="All time" />
+            <KpiCard label="API Endpoints" value="3" sub="Ingest + Webhook + Test" badge="Ready" badgeColor={SAGE} />
+          </div>
+
+          <ChartCard title="Registered Connectors" wide>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: T2 }}>Connect your POS, ERP, or any system to push data directly</div>
+              <button onClick={() => setActiveView('add')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${GOLD}33`, background: `${GOLD}15`, color: GOLD, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                <Plus size={13} /> Add Connector
+              </button>
+            </div>
+
+            {connectors.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <Cable size={32} style={{ color: T3, marginBottom: 12 }} />
+                <div style={{ fontSize: 13, color: T2, marginBottom: 6 }}>No connectors configured yet</div>
+                <div style={{ fontSize: 11, color: T3, marginBottom: 16 }}>Connect your POS, ERP, or any external system to start pushing real data</div>
+                <button onClick={() => setActiveView('add')} style={{ padding: '8px 18px', borderRadius: 6, border: `1px solid ${GOLD}33`, background: `${GOLD}12`, color: GOLD, fontSize: 11, cursor: 'pointer' }}>
+                  <Plus size={13} style={{ display: 'inline', verticalAlign: -2, marginRight: 4 }} /> Add Your First Connector
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {connectors.map(conn => {
+                  const template = CONNECTOR_TEMPLATES.find(t => t.system === conn.system);
+                  const statusColor = !conn.enabled ? T3 : conn.lastStatus === 'success' ? SAGE : conn.lastStatus === 'error' ? ROSE : AMBER;
+                  return (
+                    <div key={conn.id} onClick={() => loadDetail(conn.id)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: `1px solid ${BORDER}`, cursor: 'pointer', transition: 'background 0.15s' }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 8, background: `${(template?.color || T3)}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                        {template?.icon || '🔌'}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: T1, fontWeight: 500 }}>{conn.name}</div>
+                        <div style={{ fontSize: 10, color: T3, marginTop: 2 }}>
+                          {template?.label || conn.system} &middot; {conn.branch?.name || 'All branches'} &middot; {conn._count?.syncLogs || 0} syncs
+                          {conn.lastSyncAt && <span> &middot; Last: {new Date(conn.lastSyncAt).toLocaleDateString()}</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 6px ${statusColor}44` }} />
+                        <span style={{ fontSize: 9, color: statusColor, fontWeight: 500, textTransform: 'uppercase' }}>
+                          {!conn.enabled ? 'OFF' : conn.lastStatus}
+                        </span>
+                        <button onClick={(e) => { e.stopPropagation(); handleToggle(conn); }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${BORDER}`, background: conn.enabled ? `${SAGE}15` : 'transparent', color: conn.enabled ? SAGE : T3, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {conn.enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleTest(conn.id); }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Test connection">
+                          <Radio size={13} />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(conn.id); }} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T3, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Delete">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </ChartCard>
+
+          {/* API Reference Card */}
+          <ChartCard title="Integration Endpoints" wide>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              {[
+                { label: 'Sales Ingest', url: '/api/ingest/sales', method: 'POST', desc: 'Push daily sales from POS', color: SAGE },
+                { label: 'Inventory Ingest', url: '/api/ingest/inventory', method: 'POST', desc: 'Push stock levels from ERP', color: STEEL },
+                { label: 'Webhook Receiver', url: '/api/webhook/[id]', method: 'POST/GET', desc: 'Auto-receive data pushes', color: GOLD },
+              ].map(ep => (
+                <div key={ep.url} style={{ padding: 14, borderRadius: 8, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.01)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <span style={{ padding: '2px 6px', borderRadius: 3, fontSize: 8, fontWeight: 700, background: `${ep.color}22`, color: ep.color }}>{ep.method}</span>
+                    <span style={{ fontSize: 11, color: T1, fontWeight: 500 }}>{ep.label}</span>
+                  </div>
+                  <code style={{ fontSize: 9, color: GOLD, wordBreak: 'break-all', display: 'block', marginBottom: 4 }}>{ep.url}</code>
+                  <div style={{ fontSize: 9, color: T3 }}>{ep.desc}</div>
+                </div>
+              ))}
+            </div>
+          </ChartCard>
+        </div>
+      )}
+
+      {/* ── ADD CONNECTOR VIEW ── */}
+      {activeView === 'add' && (
+        <div>
+          <ChartCard title="Add New Connector" wide>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              <button onClick={() => setActiveView('overview')} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 10, cursor: 'pointer' }}>
+                ← Back
+              </button>
+            </div>
+
+            {/* Type selector */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 8 }}>Connector Type</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {['pos', 'erp', 'google_sheets', 'webhook'].map(t => (
+                  <button key={t} onClick={() => { setFormType(t); setFormSystem(CONNECTOR_TEMPLATES.find(ct => ct.type === t)?.system || t); }} style={{ padding: '8px 16px', borderRadius: 6, border: `1px solid ${formType === t ? GOLD : BORDER}`, background: formType === t ? `${GOLD}15` : 'transparent', color: formType === t ? GOLD : T2, fontSize: 11, cursor: 'pointer', fontWeight: 500, textTransform: 'capitalize' }}>
+                    {t === 'google_sheets' ? 'Google Sheets' : t === 'pos' ? 'POS' : t === 'erp' ? 'ERP' : 'Webhook'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* System selector */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 8 }}>System</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {templates.map(t => (
+                  <button key={t.system} onClick={() => setFormSystem(t.system)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 8, border: `1px solid ${formSystem === t.system ? `${t.color}55` : BORDER}`, background: formSystem === t.system ? `${t.color}12` : 'transparent', color: formSystem === t.system ? T1 : T2, fontSize: 11, cursor: 'pointer', textAlign: 'left', minWidth: 180 }}>
+                    <span style={{ fontSize: 18 }}>{t.icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 500 }}>{t.label}</div>
+                      <div style={{ fontSize: 9, color: T3, marginTop: 1 }}>{t.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Config fields */}
+            {selectedTemplate && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 8 }}>Configuration</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: T3, display: 'block', marginBottom: 4 }}>Connector Name</label>
+                    <input value={formName} onChange={e => setFormName(e.target.value)} placeholder={`${selectedTemplate.label} — Branch Name`} style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.03)', color: T1, fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: T3, display: 'block', marginBottom: 4 }}>Branch</label>
+                    <select value={formBranch || branchSlug} onChange={e => setFormBranch(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: `1px solid ${BORDER}`, background: CARD_BG, color: T1, fontSize: 11, outline: 'none', fontFamily: 'inherit' }}>
+                      {BRANCHES.map(b => <option key={b.slug} value={b.slug}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  {selectedTemplate.fields.map(field => (
+                    <div key={field}>
+                      <label style={{ fontSize: 10, color: T3, display: 'block', marginBottom: 4 }}>{field.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}</label>
+                      <input type={field.toLowerCase().includes('key') || field.toLowerCase().includes('secret') || field.toLowerCase().includes('password') ? 'password' : 'text'} value={formConfig[field] || ''} onChange={e => setFormConfig({ ...formConfig, [field]: e.target.value })} placeholder={field} style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.03)', color: T1, fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setActiveView('overview')} style={{ padding: '8px 16px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleCreate} disabled={saving || !formName} style={{ padding: '8px 20px', borderRadius: 6, border: 'none', background: saving ? T3 : GOLD, color: '#000', fontSize: 11, cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                {saving ? 'Creating...' : 'Create Connector'}
+              </button>
+            </div>
+          </ChartCard>
+        </div>
+      )}
+
+      {/* ── DETAIL VIEW ── */}
+      {activeView === 'detail' && selectedConnector && (
+        <div>
+          <ChartCard title="Connector Details" wide>
+            <button onClick={() => setActiveView('overview')} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 10, cursor: 'pointer', marginBottom: 16 }}>
+              ← All Connectors
+            </button>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: `${CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system)?.color || T3}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                    {CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system)?.icon || '🔌'}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, color: T1, fontWeight: 600 }}>{selectedConnector.name}</div>
+                    <div style={{ fontSize: 10, color: T3 }}>
+                      {CONNECTOR_TEMPLATES.find(t => t.system === selectedConnector.system)?.label || selectedConnector.system} &middot;
+                      {selectedConnector.type} &middot;
+                      {selectedConnector.branch?.name || 'All branches'}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => handleToggle(selectedConnector)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${selectedConnector.enabled ? SAGE : BORDER}`, background: selectedConnector.enabled ? `${SAGE}15` : 'transparent', color: selectedConnector.enabled ? SAGE : T2, fontSize: 11, cursor: 'pointer' }}>
+                    {selectedConnector.enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                    {selectedConnector.enabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                  <button onClick={() => handleTest(selectedConnector.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 11, cursor: 'pointer' }}>
+                    <Radio size={13} /> Test Connection
+                  </button>
+                </div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 8, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.01)' }}>
+                <div style={{ fontSize: 9, color: T3, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Webhook URL</div>
+                <code style={{ fontSize: 9, color: GOLD, wordBreak: 'break-all', display: 'block' }}>{webhookBaseUrl}/api/webhook/{selectedConnector.id}</code>
+                <button onClick={() => { navigator.clipboard?.writeText(`${webhookBaseUrl}/api/webhook/${selectedConnector.id}`); setToast('Webhook URL copied!'); }} style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, border: `1px solid ${BORDER}`, background: 'transparent', color: T2, fontSize: 9, cursor: 'pointer' }}>
+                  <Copy size={10} /> Copy URL
+                </button>
+              </div>
+            </div>
+
+            {/* Config display */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 8 }}>Configuration</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                {Object.entries(selectedConnector.config || {}).filter(([, v]) => v).map(([key, val]) => (
+                  <div key={key} style={{ padding: '8px 12px', borderRadius: 6, border: `1px solid ${BORDER}`, background: 'rgba(255,255,255,0.01)' }}>
+                    <div style={{ fontSize: 9, color: T3, marginBottom: 2 }}>{key}</div>
+                    <code style={{ fontSize: 10, color: T2 }}>{typeof val === 'string' && val.length > 20 ? val.slice(0, 8) + '•••••••' + val.slice(-4) : String(val)}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Sync logs */}
+            <div>
+              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: T2, marginBottom: 8 }}>Sync History ({syncLogs.length})</div>
+              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                {syncLogs.length === 0 ? (
+                  <div style={{ fontSize: 11, color: T3, padding: 20, textAlign: 'center' }}>No sync activity yet</div>
+                ) : (
+                  syncLogs.map((log: any) => {
+                    const logColor = log.status === 'success' ? SAGE : log.status === 'error' ? ROSE : AMBER;
+                    return (
+                      <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${BORDER}` }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: logColor, flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 10, color: T1 }}>{log.summary || `${log.category} — ${log.method}`}</div>
+                          <div style={{ fontSize: 9, color: T3 }}>
+                            {new Date(log.createdAt).toLocaleString()} &middot; {log.durationMs}ms &middot; {log.recordCount} records
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 9, color: logColor, fontWeight: 500, textTransform: 'uppercase' }}>{log.status}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </ChartCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   dashboard: (props) => <DashboardPage {...props} />,
   alerts: (props) => <AlertsPage {...props} />,
@@ -5654,6 +6053,7 @@ const pageComponents: Record<PageId, React.FC<{ data: StoreData }>> = {
   'cash-flow': (props) => <CashFlowPage {...props} />,
   customers: (props) => <CustomerInsightsPage {...props} />,
   'data-center': (props) => <DataCenterPage {...props} />,
+  'integrations': (props) => <IntegrationsPage {...props} />,
 };
 
 // ══════════════════════════════════════════════════════════════════

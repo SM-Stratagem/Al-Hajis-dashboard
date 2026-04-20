@@ -33,6 +33,7 @@ model Branch {
   productSales      ProductSale[]
   supplyItems       SupplyItem[]
   supplyOrders      SupplyOrder[]
+  connectors        Connector[]
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -342,4 +343,59 @@ model SupplyOrderLine {
   supplyOrder    SupplyOrder @relation(fields: [supplyOrderId], references: [id], onDelete: Cascade)
 
   @@index([supplyOrderId])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INTEGRATIONS — CONNECTOR REGISTRY
+// ═══════════════════════════════════════════════════════════════
+
+model Connector {
+  id          String   @id @default(cuid())
+  name        String   // "Magnati POS - ADCB"
+  type        String   // pos, erp, google_sheets, custom, webhook
+  system      String   // magnati, sap, odoo, square, zoho, sheets, custom
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  enabled     Boolean  @default(false)
+  config      String   @default("{}") // JSON: API keys, endpoints, credentials (encrypted in prod)
+  fieldMap    String   @default("{}") // JSON: external field → internal field mapping
+
+  lastSyncAt  DateTime?
+  lastStatus  String   @default("never") // never, success, error, partial
+  lastError   String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  syncLogs    SyncLog[]
+
+  @@index([type, enabled])
+  @@index([branchId])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INTEGRATIONS — SYNC LOG / AUDIT TRAIL
+// ═══════════════════════════════════════════════════════════════
+
+model SyncLog {
+  id            String   @id @default(cuid())
+  connectorId   String
+  connector     Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  direction     String   @default("inbound") // inbound, outbound
+  category      String   // sales, inventory, staff, products, supply-chain, transactions
+  method        String   // push, pull, webhook, manual
+  recordCount   Int      @default(0)
+  status        String   @default("success") // success, error, partial
+  errorMessage  String?
+  durationMs    Int      @default(0)
+
+  // Store a small summary of what was synced (not the full payload)
+  summary       String?
+
+  createdAt     DateTime @default(now())
+
+  @@index([connectorId, createdAt])
+  @@index([category])
 }
