@@ -29,11 +29,6 @@ export const db =
         url: getDatabaseUrl(),
       },
     },
-    // Connection timeout to prevent hanging
-    // @ts-ignore - newer Prisma versions support this
-    timeout: 5000,
-    // @ts-ignore
-    transactionTimeout: 10000,
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
