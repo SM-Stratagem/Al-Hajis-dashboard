@@ -267,6 +267,23 @@ function useStoreData(view: ViewMode, dataVersion: number): { loading: boolean; 
   const isAgg = isAggregateView(view);
   const currency = getCurrencyForView(view);
 
+  // Helper: fetch with timeout
+  const fetchWithTimeout = async (url: string, timeout = 3000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(id);
+      return res;
+    } catch (e: any) {
+      clearTimeout(id);
+      if (e.name === 'AbortError' || e.message === 'Request timeout') {
+        return null;
+      }
+      throw e;
+    }
+  };
+
   const [data, setData] = useState<StoreData>({
     months: [...MONTHS], monthsFull: [...MONTHS_FULL],
     gross: [...GROSS], returns: [...RETURNS], net: [...NET], cash: [...CASH], card: [...CARD],
@@ -305,7 +322,7 @@ function useStoreData(view: ViewMode, dataVersion: number): { loading: boolean; 
             params.set('viewType', 'all');
           }
 
-          const aggRes = await fetch(`/api/data/aggregate?${params}`).then(r => r.json()).catch(() => null);
+          const aggRes = await fetchWithTimeout(`/api/data/aggregate?${params}`).then(r => r?.json()).catch(() => null);
           if (aggRes && aggRes.monthlySales && aggRes.monthlySales.length > 0) {
             setHasData(true);
             const msRes = aggRes.monthlySales;
@@ -3317,10 +3334,27 @@ function DataCenterPage({ data }: { data: StoreData }) {
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState('');
 
+  // ── Fetch with timeout helper ──
+  const fetchWithTimeout = async (url: string, options?: RequestInit, timeout = 5000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return res;
+    } catch (e: any) {
+      clearTimeout(e);
+      if (e.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
+      throw e;
+    }
+  };
+
   // ── Fetch status ──
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/data/status');
+      const res = await fetchWithTimeout('/api/data/status');
       const data = await res.json();
       setStatus(data);
     } catch (e) {
