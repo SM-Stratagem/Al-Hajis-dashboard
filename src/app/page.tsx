@@ -284,6 +284,30 @@ function useStoreData(view: ViewMode, dataVersion: number): { loading: boolean; 
     }
   };
 
+  const makeFallbackData = (slug: string): StoreData => {
+    const branchName = getBranchBySlug(slug)?.name || slug;
+    return {
+      months: [...MONTHS], monthsFull: [...MONTHS_FULL],
+      gross: [...GROSS], returns: [...RETURNS], net: [...NET], cash: [...CASH], card: [...CARD],
+      daily: DAILY.map(d => ({ ...d })),
+      capexItems: CAPEX_ITEMS.map(i => ({ ...i })),
+      overheads: OVERHEADS.map(o => ({ ...o })),
+      pnl: { ...PNL, expenses: PNL.expenses.map(e => ({ ...e })) },
+      totalGross, totalNet, totalReturns, totalCash, totalCard,
+      avgMonthlyNet, capitalRecovered, avgReturnRate, cardShare,
+      cumulativeNet: [...cumulativeNet], returnRates: [...returnRates],
+      momGrowth: [...momGrowth], cardPct: [...cardPct],
+      totalCapex: TOTAL_CAPEX, totalOverheads: TOTAL_OVERHEADS, totalInvestment: TOTAL_INVESTMENT,
+      monthlyData: monthlyData.map(d => ({ ...d })),
+      capexByCategory: capexByCategory.map(c => ({ ...c })),
+      isAggregate: false,
+      branchCount: 1,
+      branchNames: [branchName],
+      currency,
+      dataVersion,
+    };
+  };
+
   const [data, setData] = useState<StoreData>({
     months: [...MONTHS], monthsFull: [...MONTHS_FULL],
     gross: [...GROSS], returns: [...RETURNS], net: [...NET], cash: [...CASH], card: [...CARD],
@@ -405,16 +429,16 @@ function useStoreData(view: ViewMode, dataVersion: number): { loading: boolean; 
             setData(prev => ({ ...prev, isAggregate: true, branchCount: aggRes?.branchCount || 0, branchNames: aggRes?.branchNames || [], currency }));
             setHasData(false);
           }
-        } else {
+          } else {
           // ── Single branch view: fetch from individual APIs ──
           const slug = view.slug;
           const qs = slug !== DEFAULT_BRANCH_SLUG ? `?branchSlug=${encodeURIComponent(slug)}` : '';
           const [msRes, dailyRes, capexRes, ohRes, pnlRes] = await Promise.all([
-            fetch(`/api/data/monthly-sales${qs}`).then(r => r.json()).catch(() => []),
-            fetch(`/api/data/daily-sales${qs}`).then(r => r.json()).catch(() => []),
-            fetch(`/api/data/capex${qs}`).then(r => r.json()).catch(() => []),
-            fetch(`/api/data/overheads${qs}`).then(r => r.json()).catch(() => []),
-            fetch(`/api/data/pnl${qs}`).then(r => r.json()).catch(() => []),
+            fetchWithTimeout(`/api/data/monthly-sales${qs}`).then(r => r?.json()).catch(() => []),
+            fetchWithTimeout(`/api/data/daily-sales${qs}`).then(r => r?.json()).catch(() => []),
+            fetchWithTimeout(`/api/data/capex${qs}`).then(r => r?.json()).catch(() => []),
+            fetchWithTimeout(`/api/data/overheads${qs}`).then(r => r?.json()).catch(() => []),
+            fetchWithTimeout(`/api/data/pnl${qs}`).then(r => r?.json()).catch(() => []),
           ]);
           if (msRes && msRes.length > 0) {
             setHasData(true);
@@ -464,7 +488,11 @@ function useStoreData(view: ViewMode, dataVersion: number): { loading: boolean; 
               branchNames: [getBranchBySlug(slug)?.name || slug],
               currency,
             });
-          } else if (msRes && msRes.length === 0) {
+          } else if (slug === DEFAULT_BRANCH_SLUG) {
+            // Keep the dashboard usable if the production DB is empty or unreachable.
+            setData(makeFallbackData(slug));
+            setHasData(true);
+          } else {
             setHasData(false);
           }
         }

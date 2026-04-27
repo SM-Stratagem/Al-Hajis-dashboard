@@ -16,6 +16,9 @@ function getDatabaseUrl(): string {
   if (process.env.DATABASE_URL) {
     return process.env.DATABASE_URL
   }
+  if (process.env.DIRECT_URL) {
+    return process.env.DIRECT_URL
+  }
   // Fallback to pooled URL
   return process.env.POSTGRES_URL ?? ''
 }
